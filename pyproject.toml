@@ -1,0 +1,57 @@
+[build-system]
+requires = ["hatchling>=1.25"]
+build-backend = "hatchling.build"
+
+[project]
+name = "peche-tn-decision-engine"
+version = "1.9.5"
+description = "Explainable, safety-first surfcasting decision support for Tunisia"
+readme = "README.md"
+requires-python = ">=3.11"
+authors = [{ name = "Peche TN contributors" }]
+dependencies = [
+  "fastapi==0.141.1",
+  "httpx==0.28.1",
+  "pydantic==2.13.5",
+  "tzdata==2026.3",
+  "uvicorn[standard]==0.52.4",
+]
+
+[project.optional-dependencies]
+dev = [
+  "mypy==1.20.2",
+  "pytest==8.4.2",
+  "pytest-asyncio==0.26.0",
+  "pytest-cov==6.3.0",
+  "respx==0.23.1",
+  "ruff==0.16.6",
+]
+
+[tool.hatch.build.targets.wheel]
+packages = ["apps/api/src/spotdata"]
+
+[tool.pytest.ini_options]
+addopts = "-q --strict-markers --disable-warnings"
+testpaths = ["apps/api/tests"]
+pythonpath = [".", "apps/api/src"]
+asyncio_mode = "auto"
+
+[tool.ruff]
+target-version = "py311"
+line-length = 100
+src = ["apps/api/src", "apps/api/tests"]
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "B", "UP", "SIM", "RUF"]
+ignore = ["E501"]
+
+[tool.ruff.lint.isort]
+known-first-party = ["spotdata"]
+
+[tool.mypy]
+python_version = "3.11"
+strict = true
+plugins = ["pydantic.mypy"]
+mypy_path = "apps/api/src"
+packages = ["spotdata"]
+warn_unused_configs = true

@@ -1,0 +1,401 @@
+[
+  {
+    "category": "الوحدات",
+    "name": "knots → km/h (1.852)",
+    "status": "PASS",
+    "detail": "10 knots = 18.52 km/h",
+    "reference": "1 knot = 1.852 km/h بالتعريف"
+  },
+  {
+    "category": "الوحدات",
+    "name": "km/h → knots (عكس)",
+    "status": "PASS",
+    "detail": "18.52 km/h = 10.0 knots",
+    "reference": "عكس التحويل الأول"
+  },
+  {
+    "category": "الوحدات",
+    "name": "km/h → m/s (÷3.6)",
+    "status": "PASS",
+    "detail": "36 km/h = 10.0 m/s",
+    "reference": "1 m/s = 3.6 km/h بالتعريف"
+  },
+  {
+    "category": "الاصطلاحات",
+    "name": "ريح من اتجاه البحر = بحرية (ONSHORE)",
+    "status": "PASS",
+    "detail": "ريح من 90° على شاطئ 90° => onshore",
+    "reference": "Open-Meteo: wind_direction = جهة القدوم"
+  },
+  {
+    "category": "الاصطلاحات",
+    "name": "ريح من البر = برّية (OFFSHORE)",
+    "status": "PASS",
+    "detail": "ريح من 270° => offshore",
+    "reference": "عكس اتجاه البحر 180°"
+  },
+  {
+    "category": "الاصطلاحات",
+    "name": "موج من اتجاه البحر = DIRECT",
+    "status": "PASS",
+    "detail": "موج من 90° => direct",
+    "reference": "Open-Meteo: wave_direction = جهة القدوم"
+  },
+  {
+    "category": "الاصطلاحات",
+    "name": "موج من البر = INCONSISTENT",
+    "status": "PASS",
+    "detail": "موج من 270° => inconsistent",
+    "reference": "|Δ| > 110°"
+  },
+  {
+    "category": "الاصطلاحات",
+    "name": "تيار نحو اتجاه البحر => cross=+1 (بحراً)",
+    "status": "PASS",
+    "detail": "تيار نحو 90° => cross_shore=1.0",
+    "reference": "Open-Meteo: ocean_current_direction = جهة الذهاب"
+  },
+  {
+    "category": "الاصطلاحات",
+    "name": "تيار نحو الشاطئ => cross=-1 (شاطئاً)",
+    "status": "PASS",
+    "detail": "تيار نحو 270° => cross_shore=-1.0",
+    "reference": "نفس الاصطلاح معكوساً"
+  },
+  {
+    "category": "الاصطلاحات",
+    "name": "مركبة الريح الشاطئية = v·cosΔ",
+    "status": "PASS",
+    "detail": "ريح 10 كم/س من 90° => shoreward=10.0, along=-0.0",
+    "reference": "إسقاط متجه قياسي"
+  },
+  {
+    "category": "الاصطلاحات",
+    "name": "ريح برّية => shoreward سالب",
+    "status": "PASS",
+    "detail": "ريح 10 كم/س من 270° => shoreward=-10.0",
+    "reference": "cos(180°) = -1"
+  },
+  {
+    "category": "الاصطلاحات",
+    "name": "فرق دائري 350°↔10° = 20° (وليس 340°)",
+    "status": "PASS",
+    "detail": "circular_difference = 20.0",
+    "reference": "الفرق الأقصر دائرياً"
+  },
+  {
+    "category": "الاصطلاحات",
+    "name": "فرق موقّع يلتف عبر ±180",
+    "status": "PASS",
+    "detail": "10-350 = 20.0",
+    "reference": "في [-180, 180)"
+  },
+  {
+    "category": "فيزياء الموج",
+    "name": "طول الموجة العميقة L0 = gT²/2π",
+    "status": "PASS",
+    "detail": "T=6s => L0 = 56.188 م",
+    "reference": "g·36/(2π) = 56.19 م"
+  },
+  {
+    "category": "فيزياء الموج",
+    "name": "الانحدار Hs/L0",
+    "status": "PASS",
+    "detail": "Hs=1, T=6 => 0.01780",
+    "reference": "1/56.19"
+  },
+  {
+    "category": "فيزياء الموج",
+    "name": "معادلة التشتت ω²=g·k·tanh(kh) عند h=1.5m",
+    "status": "PASS",
+    "detail": "g·k·tanh(kh) = 1.096623 vs ω² = 1.096623",
+    "reference": "العلاقة التشتتية القياسية"
+  },
+  {
+    "category": "فيزياء الموج",
+    "name": "معادلة التشتت ω²=g·k·tanh(kh) عند h=10.0m",
+    "status": "PASS",
+    "detail": "g·k·tanh(kh) = 1.096623 vs ω² = 1.096623",
+    "reference": "العلاقة التشتتية القياسية"
+  },
+  {
+    "category": "فيزياء الموج",
+    "name": "معادلة التشتت ω²=g·k·tanh(kh) عند h=50.0m",
+    "status": "PASS",
+    "detail": "g·k·tanh(kh) = 1.096623 vs ω² = 1.096623",
+    "reference": "العلاقة التشتتية القياسية"
+  },
+  {
+    "category": "فيزياء الموج",
+    "name": "Ub = π·Hrms/(T·sinh(kh)) مع Hrms=Hs/√2",
+    "status": "PASS",
+    "detail": "Ub = 0.5119 م/ث (مرجع 0.5119)",
+    "reference": "حل النظرية الخطية بفرض رايلي"
+  },
+  {
+    "category": "فيزياء الموج",
+    "name": "وكيل طاقة الموج H²T",
+    "status": "PASS",
+    "detail": "H=2,T=8 => 32.0",
+    "reference": "∝ P=(rho·g²/64π)·Hs²·T"
+  },
+  {
+    "category": "فيزياء الموج",
+    "name": "جرّ جانبي ∝ sin(2alpha): أعظمي عند 45° وصفر عند 0/90",
+    "status": "PASS",
+    "detail": "alpha=45° => 6.000 · alpha=0° => 0.000 · alpha=90° => 0.000",
+    "reference": "صيغة إجهاد الإشعاع Sxy"
+  },
+  {
+    "category": "فيزياء الموج",
+    "name": "حصة النظام الثانوي (طاقتان متساويتان = 0.5)",
+    "status": "PASS",
+    "detail": "share = 0.5",
+    "reference": "طاقة ∝ H²"
+  },
+  {
+    "category": "الريح",
+    "name": "إجهاد الريح τ = rho·Cd·U²",
+    "status": "PASS",
+    "detail": "U=10 m/s => τ = 0.1470 Pa (مرجع 0.1470)",
+    "reference": "معادلة السحب القياسية"
+  },
+  {
+    "category": "الريح",
+    "name": "معامل السحب Cd ضمن المجال الفيزيائي (0.0008-0.003)",
+    "status": "PASS",
+    "detail": "Cd(3,10,25) = ['0.00120', '0.00120', '0.00212']",
+    "reference": "قيم منشورة لـ Cd فوق البحر"
+  },
+  {
+    "category": "الريح",
+    "name": "تماسك الاتجاه R=1 عند اتساق كامل",
+    "status": "PASS",
+    "detail": "R = 1.0 (n=3)",
+    "reference": "R=|ΣUe^{iθ}|/ΣU"
+  },
+  {
+    "category": "الريح",
+    "name": "المتوسط الدائري الموزون بالسرعة (0°/90° متناظر = 45°)",
+    "status": "PASS",
+    "detail": "متوسط (0°,90°) = 45.0°",
+    "reference": "atan2 للمجموع المتجهي"
+  },
+  {
+    "category": "الريح",
+    "name": "معامل الهبة = هبة/مستمرة (وحجب قرب الهدوء)",
+    "status": "PASS",
+    "detail": "gust_factor(20,30) = 1.5 · (3,30) = None",
+    "reference": "نسبة بسيطة تُحجب تحت عتبة الاستقرار"
+  },
+  {
+    "category": "الفلك",
+    "name": "القمر الجديد 11 سبتمبر 2026 (phase ≈ 0)",
+    "status": "PASS",
+    "detail": "phase(11/9) = 0.0123",
+    "reference": "starwalk.space: قمر جديد 11/9 03:27 UTC"
+  },
+  {
+    "category": "الفلك",
+    "name": "البدر 26 سبتمبر 2026 (phase ≈ 0.5)",
+    "status": "PASS",
+    "detail": "phase(26/9) = 0.4929",
+    "reference": "starwalk.space: بدر 26/9 16:49 UTC"
+  },
+  {
+    "category": "الفلك",
+    "name": "إضاءة القمر: محاق ≈ 0% وبدر ≈ 100%",
+    "status": "PASS",
+    "detail": "illumination(11/9) = 0.001 · (26/9) = 1.000",
+    "reference": "النموذج الجيومتري"
+  },
+  {
+    "category": "الفلك",
+    "name": "الشروق مطابق للمرجع (06:02)",
+    "status": "PASS",
+    "detail": "المحرك: 06:02 · المرجع Metcheck: 06:02",
+    "reference": "Metcheck Tunis 2026-09-15 (alt=-0.833°)"
+  },
+  {
+    "category": "الفلك",
+    "name": "الغروب مطابق للمرجع (18:30 ±5د)",
+    "status": "PASS",
+    "detail": "المحرك: 18:28 · المرجع Metcheck: 18:30",
+    "reference": "فرق الانكسار النموذجي ≤ 5 دقائق"
+  },
+  {
+    "category": "الفلك",
+    "name": "ارتفاع الشمس: موجب ظهراً وسالب منتصف الليل",
+    "status": "PASS",
+    "detail": "ظهراً 55.9° · منتصف الليل -49.9°",
+    "reference": "NOAA/Michalsky"
+  },
+  {
+    "category": "المد",
+    "name": "معدل مستوى البحر = مشتقة السلسلة (ذروة جيبية)",
+    "status": "PASS",
+    "detail": "أقصى معدل 0.388 م/س (مرجع نظري 0.405)",
+    "reference": "dh/dt بفروق مركزية"
+  },
+  {
+    "category": "المد",
+    "name": "تصنيف المد (صاعد/هابط/ركود) مطابق للمشتقة",
+    "status": "PASS",
+    "detail": "48 ساعة مصنفة · مخالفات 0",
+    "reference": "إشارة المشتقة مع عتبة ركود"
+  },
+  {
+    "category": "المد",
+    "name": "كشف قمم/قيعان المد (48س جيبية => قمتان وقاعان)",
+    "status": "PASS",
+    "detail": "قمم 2 · قيعان 2",
+    "reference": "منعطفات الجيبية بفترة 12.42س"
+  },
+  {
+    "category": "المد",
+    "name": "مدى المد اليومي ≈ سعة المنحنى (~1.6 م)",
+    "status": "PASS",
+    "detail": "مدى 2026-09-15 = 1.592 م",
+    "reference": "max - min لكل يوم"
+  },
+  {
+    "category": "المد",
+    "name": "تصنيف حيّة/مات حسب نسبة المدى (1.6/1.0 = حيّة)",
+    "status": "PASS",
+    "detail": "تصنيف spring · نسبة 1.6",
+    "reference": "نسبة المدى إلى الوسيط"
+  },
+  {
+    "category": "الجغرافيا",
+    "name": "منطقة بنزرت => bizerte_tunis",
+    "status": "PASS",
+    "detail": "tunisian_zone(37.27,9.87) = bizerte_tunis",
+    "reference": "الخريطة الساحلية التونسية"
+  },
+  {
+    "category": "الجغرافيا",
+    "name": "منطقة قليبية => cap_bon_hammamet",
+    "status": "PASS",
+    "detail": "tunisian_zone(36.85,11.12) = cap_bon_hammamet",
+    "reference": "الخريطة الساحلية التونسية"
+  },
+  {
+    "category": "الجغرافيا",
+    "name": "منطقة المنستير => sahel",
+    "status": "PASS",
+    "detail": "tunisian_zone(35.76,10.83) = sahel",
+    "reference": "الخريطة الساحلية التونسية"
+  },
+  {
+    "category": "الجغرافيا",
+    "name": "منطقة قابس => gabes",
+    "status": "PASS",
+    "detail": "tunisian_zone(33.88,10.1) = gabes",
+    "reference": "الخريطة الساحلية التونسية"
+  },
+  {
+    "category": "الجغرافيا",
+    "name": "منطقة جربة => south",
+    "status": "PASS",
+    "detail": "tunisian_zone(33.8,10.85) = south",
+    "reference": "الخريطة الساحلية التونسية"
+  },
+  {
+    "category": "الجغرافيا",
+    "name": "منطقة قابس داخل نطاق المد العالي",
+    "status": "PASS",
+    "detail": "قابس داخل النطاق، تونس العاصمة خارجه",
+    "reference": "خليج قابس"
+  },
+  {
+    "category": "البيانات الحية",
+    "name": "ريح ضمن المجال الفيزيائي (0-60 كم/س)",
+    "status": "PASS",
+    "detail": "الريح 5.8-18.0 كم/س",
+    "reference": "حدود فيزيائية"
+  },
+  {
+    "category": "البيانات الحية",
+    "name": "موج ضمن المجال الفيزيائي (0-8 م)",
+    "status": "PASS",
+    "detail": "الموج 0.26-0.52 م",
+    "reference": "حدود فيزيائية"
+  },
+  {
+    "category": "البيانات الحية",
+    "name": "حرارة سطح البحر تونس سبتمبر (15-32°م)",
+    "status": "PASS",
+    "detail": "SST 29.3-29.5°م",
+    "reference": "المناخ المحلي"
+  },
+  {
+    "category": "البيانات الحية",
+    "name": "الضغط ضمن المجال (950-1050 hPa)",
+    "status": "PASS",
+    "detail": "الضغط 1017.0-1020.0 hPa",
+    "reference": "حدود فيزيائية"
+  },
+  {
+    "category": "البيانات الحية",
+    "name": "الأشعة فوق البنفسجية ضمن (0-12)",
+    "status": "PASS",
+    "detail": "UV 0.0-6.8",
+    "reference": "حدود فيزيائية"
+  },
+  {
+    "category": "البيانات الحية",
+    "name": "مستوى البحر ضمن (±1.5 م MSL)",
+    "status": "PASS",
+    "detail": "SL -0.460--0.230 م",
+    "reference": "حدود فيزيائية"
+  },
+  {
+    "category": "الاتساق الحي",
+    "name": "هوية المركبات: √(V⊥²+V∥²) = V",
+    "status": "PASS",
+    "detail": "أكبر انحراف 5.14e-03 كم/س (ضمن تقريب خانتين)",
+    "reference": "الإسقاط يحفظ المقدار؛ الانحراف من تقريب JSON"
+  },
+  {
+    "category": "الاتساق الحي",
+    "name": "إعادة حساب H²T مطابقة للمشتق",
+    "status": "PASS",
+    "detail": "proxy=0.5410 vs 0.5415 (ضمن تقريب 4 خانات)",
+    "reference": "H²·T"
+  },
+  {
+    "category": "الاتساق الحي",
+    "name": "السرعة المدارية تتناقص مع العمق",
+    "status": "PASS",
+    "detail": "Ub(1.5م)=0.370 م/ث ≥ Ub(5م)=0.088 م/ث",
+    "reference": "Ub ∝ 1/sinh(kh)"
+  },
+  {
+    "category": "الاتساق الحي",
+    "name": "نطاق السرعة المدارية مرتّب وبين قيمتي العمق",
+    "status": "PASS",
+    "detail": "النطاق 0.09 إلى 0.36 · المرجّع: 0.09-0.37",
+    "reference": "يُبنى من Ub عند 5م و1.5م"
+  },
+  {
+    "category": "الاتساق الحي",
+    "name": "عامل [1.11] يحمل نفس المتوسط الدائري المعاد حسابه",
+    "status": "PASS",
+    "detail": "متوسط 327° في: رياح متقلبة بين جنوبية غربية وشمالية (متوسط دائري 327° من 24…",
+    "reference": "إعادة حساب مستقلة"
+  },
+  {
+    "category": "الاتساق الحي",
+    "name": "الخلاصة لا تقل عن آليتها الغالبة",
+    "status": "PASS",
+    "detail": "خلاصة moderate · الغالبة longshore_current=moderate",
+    "reference": "قاعدة الشدة القصوى"
+  },
+  {
+    "category": "الاتساق الحي",
+    "name": "سطر أساس الثقة يعرض المكونات المرجّحة",
+    "status": "PASS",
+    "detail": "الأساس 92/100 قبل السقوف = اكتمال المتغيرات 55 نقطة (وزن 55%) + أفق ال…",
+    "reference": "نشر القاعدة للتدقيق"
+  }
+]

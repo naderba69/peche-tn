@@ -1,0 +1,16 @@
+.git
+.github
+.venv
+.mypy_cache
+.pytest_cache
+.ruff_cache
+coverage
+node_modules
+.next
+apps/api/tests
+e2e
+playwright.config.ts
+docs
+*.log
+Dockerfile
+compose.yaml

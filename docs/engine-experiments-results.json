@@ -1,0 +1,361 @@
+{
+  "generated_at": "2026-09-30T13:46:03.553783+01:00",
+  "engine_version": "1.9.0",
+  "passed": 53,
+  "failed": 0,
+  "findings": [
+    {
+      "name": "binary decisions remain safety-gated under fuzz",
+      "detail": "go=37 / 3000; no_go=2963; reasons={'safety_hazard': 2546, 'conservative_uncertainty': 336, 'field_infeasible': 9, 'critical_data_missing': 72}. Caution-only days require conservative NO_GO; no probability is inferred.",
+      "severity": "low"
+    },
+    {
+      "name": "conservative_uncertainty is used when no GO safety window exists",
+      "detail": "Across 3000 randomized datasets CONSERVATIVE_UNCERTAINTY appeared 336 times; this includes caution-only days without a window that passed the safety gate.",
+      "severity": "low"
+    },
+    {
+      "name": "all-day caution is not a GO window",
+      "detail": "The product requires at least one safety-GO window; caution-only scenarios return NO_GO. steady wind 33 km/h (caution band 32-44): no_go/conservative_uncertainty (hours ['caution']) | gust 43 km/h (caution band 42-58): no_go/conservative_uncertainty (hours ['caution']) | wave 1.2 m (caution band 1.10-1.85): no_go/conservative_uncertainty (hours ['caution']) | high UV 9 all day: no_go/conservative_uncertainty (hours ['caution']) | heavy rain 16 mm/h all day: no_go/conservative_uncertainty (hours ['caution']) | visibility 500 m (caution band 200-1000): no_go/conservative_uncertainty (hours ['caution']) | steep chop 0.7 m / 2.5 s (steepness caution): no_go/conservative_uncertainty (hours ['caution']) | onshore wind+wave combo (wind 25/gust 35/wave 1.0): no_go/conservative_uncertainty (hours ['caution']) | convective instability (cape 1500 + rain): no_go/conservative_uncertainty (hours ['caution']) | inconsistent wave direction: no_go/conservative_uncertainty (hours ['caution'])",
+      "severity": "low"
+    }
+  ],
+  "report": [
+    {
+      "type": "check",
+      "name": "determinism: identical input -> identical output",
+      "status": "PASS",
+      "detail": "double evaluation compared field by field"
+    },
+    {
+      "type": "check",
+      "name": "baseline golden case is go/safe_window",
+      "status": "PASS",
+      "detail": "decision=go reason=safe_window opportunity=92 confidence=85 field=workable force=none"
+    },
+    {
+      "type": "check",
+      "name": "top-level decision is binary go/no_go (no caution/unknown leak)",
+      "status": "PASS",
+      "detail": "decision=go"
+    },
+    {
+      "type": "check",
+      "name": "engine version exported",
+      "status": "PASS",
+      "detail": "engine_version=1.9.0"
+    },
+    {
+      "type": "check",
+      "name": "wind no_go gate at 44 km/h (intermediate)",
+      "status": "PASS",
+      "detail": "transition at value 44 (documented no_go threshold 44.0, label sustained_wind_no_go); before=[10, 31, 32, 33, 43] after=[44, 45, 60]"
+    },
+    {
+      "type": "check",
+      "name": "gust no_go gate at 58 km/h (intermediate)",
+      "status": "PASS",
+      "detail": "transition at value 58 (documented no_go threshold 58.0, label gust_no_go); before=[10, 41, 42, 57] after=[58, 59, 80]"
+    },
+    {
+      "type": "check",
+      "name": "wave no_go gate at 1.85 m (sandy/intermediate)",
+      "status": "PASS",
+      "detail": "transition at value 1.85 (documented no_go threshold 1.85, label wave_height_no_go); before=[0.4, 0.8, 1.09, 1.1, 1.5, 1.84] after=[1.85, 1.86, 2.2]"
+    },
+    {
+      "type": "check",
+      "name": "wave no_go respects rocky multiplier (x0.8 -> 1.48 m)",
+      "status": "PASS",
+      "detail": "transition at value 1.48 (documented no_go threshold 1.48, label wave_height_no_go); before=[0.4, 1.43] after=[1.48, 1.53]"
+    },
+    {
+      "type": "check",
+      "name": "wave no_go respects cliff multiplier (x0.68 -> 1.26 m)",
+      "status": "PASS",
+      "detail": "transition at value 1.26 (documented no_go threshold 1.26, label wave_height_no_go); before=[0.4, 1.21] after=[1.26, 1.31]"
+    },
+    {
+      "type": "check",
+      "name": "wave no_go respects jetty multiplier (x0.72 -> 1.33 m)",
+      "status": "PASS",
+      "detail": "transition at value 1.33 (documented no_go threshold 1.33, label wave_height_no_go); before=[0.4, 1.28] after=[1.33, 1.38]"
+    },
+    {
+      "type": "check",
+      "name": "wave no_go respects beginner profile (1.55 m)",
+      "status": "PASS",
+      "detail": "transition at value 1.55 (documented no_go threshold 1.55, label wave_height_no_go); before=[0.4, 1.5] after=[1.55, 1.6]"
+    },
+    {
+      "type": "check",
+      "name": "wave no_go respects advanced profile (2.10 m)",
+      "status": "PASS",
+      "detail": "transition at value 2.1 (documented no_go threshold 2.1, label wave_height_no_go); before=[0.4, 2.05] after=[2.1, 2.15]"
+    },
+    {
+      "type": "check",
+      "name": "steepness no_go gate fires at H/L0 >= 0.090 only (not in the caution band)",
+      "status": "PASS",
+      "detail": "2.0s->no_go; 2.2s->no_go; 2.4s->no_go; 2.5s->no_go; 2.6s->caution; 2.8s->caution; 3.0s->go; 3.4s->go; 4.0s->go"
+    },
+    {
+      "type": "check",
+      "name": "visibility no_go gate at 200 m (caution 200-999, go >=1000)",
+      "status": "PASS",
+      "detail": "2000->go; 1000->go; 999->caution; 200->caution; 199->no_go; 100->no_go; 50->no_go"
+    },
+    {
+      "type": "check",
+      "name": "thunderstorm codes 95/96/99 are no_go; 1/3/61/80 are not",
+      "status": "PASS",
+      "detail": "1->go; 3->go; 61->go; 80->go; 95->no_go; 96->no_go; 99->no_go"
+    },
+    {
+      "type": "check",
+      "name": "missing critical field wind_speed_kmh -> no_go critical_data_missing",
+      "status": "PASS",
+      "detail": "decision=no_go reason=critical_data_missing"
+    },
+    {
+      "type": "check",
+      "name": "missing critical field wind_gust_kmh -> no_go critical_data_missing",
+      "status": "PASS",
+      "detail": "decision=no_go reason=critical_data_missing"
+    },
+    {
+      "type": "check",
+      "name": "missing critical field wave_height_m -> no_go critical_data_missing",
+      "status": "PASS",
+      "detail": "decision=no_go reason=critical_data_missing"
+    },
+    {
+      "type": "check",
+      "name": "missing critical field weather_code -> no_go critical_data_missing",
+      "status": "PASS",
+      "detail": "decision=no_go reason=critical_data_missing"
+    },
+    {
+      "type": "check",
+      "name": "missing optional field uv_index does not block a safe trip",
+      "status": "PASS",
+      "detail": "decision=go reason=safe_window"
+    },
+    {
+      "type": "check",
+      "name": "missing optional field sea_surface_temperature_c does not block a safe trip",
+      "status": "PASS",
+      "detail": "decision=go reason=safe_window"
+    },
+    {
+      "type": "check",
+      "name": "missing optional field pressure_msl_hpa does not block a safe trip",
+      "status": "PASS",
+      "detail": "decision=go reason=safe_window"
+    },
+    {
+      "type": "check",
+      "name": "missing optional field ocean_current_velocity_kmh does not block a safe trip",
+      "status": "PASS",
+      "detail": "decision=go reason=safe_window"
+    },
+    {
+      "type": "check",
+      "name": "missing optional field visibility_m does not block a safe trip",
+      "status": "PASS",
+      "detail": "decision=go reason=safe_window"
+    },
+    {
+      "type": "check",
+      "name": "missing optional field precipitation_mm does not block a safe trip",
+      "status": "PASS",
+      "detail": "decision=go reason=safe_window"
+    },
+    {
+      "type": "check",
+      "name": "all-caution day -> no_go conservative_uncertainty",
+      "status": "PASS",
+      "detail": "decision=no_go reason=conservative_uncertainty"
+    },
+    {
+      "type": "check",
+      "name": "high-UV all day with no safety-GO window -> no_go",
+      "status": "PASS",
+      "detail": "decision=no_go reason=conservative_uncertainty"
+    },
+    {
+      "type": "check",
+      "name": "localized hazard is avoided, not trip-cancelling",
+      "status": "PASS",
+      "detail": "decision=go avoid_windows=1 recommended=3"
+    },
+    {
+      "type": "check",
+      "name": "all-day hazard -> no_go safety_hazard",
+      "status": "PASS",
+      "detail": "reason=safety_hazard"
+    },
+    {
+      "type": "check",
+      "name": "caution factors on some hours do not cancel the trip",
+      "status": "PASS",
+      "detail": "decision=go"
+    },
+    {
+      "type": "check",
+      "name": "three near-limit factors together escalate to no_go",
+      "status": "PASS",
+      "detail": "decision=no_go reason=safety_hazard"
+    },
+    {
+      "type": "check",
+      "name": "two near-limit factors escalate to no_go",
+      "status": "PASS",
+      "detail": "decision=no_go reason=safety_hazard"
+    },
+    {
+      "type": "check",
+      "name": "single near-limit wind all day has no GO window",
+      "status": "PASS",
+      "detail": "decision=no_go"
+    },
+    {
+      "type": "check",
+      "name": "single near-limit wave all day has no GO window",
+      "status": "PASS",
+      "detail": "decision=no_go"
+    },
+    {
+      "type": "check",
+      "name": "opportunity indicator varies but binary decision is invariant across it",
+      "status": "PASS",
+      "detail": "{0.05: ('go', 75), 0.2: ('go', 77), 0.35: ('go', 87), 0.6: ('go', 87), 0.9: ('go', 87), 1.0: ('go', 87)}"
+    },
+    {
+      "type": "check",
+      "name": "high fouling transport proxy alone never yields fouling_confirmed",
+      "status": "PASS",
+      "detail": "decision=no_go reason=conservative_uncertainty fouling_level=1 force=False"
+    },
+    {
+      "type": "check",
+      "name": "field reports do not affect the decision",
+      "status": "PASS",
+      "detail": "decision=go reason=safe_window baseline=go/safe_window"
+    },
+    {
+      "type": "check",
+      "name": "test cast does not affect the decision",
+      "status": "PASS",
+      "detail": "decision=go reason=safe_window baseline=go/safe_window"
+    },
+    {
+      "type": "check",
+      "name": "manual INM warning claim does not affect the decision",
+      "status": "PASS",
+      "detail": "decision=go reason=safe_window baseline=go/safe_window"
+    },
+    {
+      "type": "check",
+      "name": "high holding difficulty -> no_go field_infeasible (safety hours still go)",
+      "status": "PASS",
+      "detail": "reason=field_infeasible holding=high"
+    },
+    {
+      "type": "check",
+      "name": "moderate holding remains separate from all-caution safety no-go",
+      "status": "PASS",
+      "detail": "decision=no_go reason=conservative_uncertainty holding=moderate"
+    },
+    {
+      "type": "check",
+      "name": "spring/neap classification is informational and does not flip the decision",
+      "status": "PASS",
+      "detail": "base spring=intermediate variant spring=unknown decision=go->go"
+    },
+    {
+      "type": "check",
+      "name": "nearby observed thunderstorm (<=30 km) cancels only its own hour",
+      "status": "PASS",
+      "detail": "decision=go no_go hours=3"
+    },
+    {
+      "type": "check",
+      "name": "wind sweep 0..60 is monotone (no no_go->go flip)",
+      "status": "PASS",
+      "detail": "['go', 'go', 'go', 'go', 'go', 'go', 'go', 'go', 'go', 'go', 'go', 'go', 'go', 'go', 'go', 'go', 'go', 'go', 'go', 'go', 'go', 'go', 'go', 'go', 'go', 'go', 'go', 'go', 'go', 'go', 'go', 'go', 'no_go', 'no_go', 'no_go', 'no_go', 'no_go', 'no_go', 'no_go', 'no_go', 'no_go', 'no_go', 'no_go', 'no_go', 'no_go', 'no_go', 'no_go', 'no_go', 'no_go', 'no_go', 'no_go', 'no_go', 'no_go', 'no_go', 'no_go', 'no_go', 'no_go', 'no_go', 'no_go', 'no_go', 'no_go']"
+    },
+    {
+      "type": "check",
+      "name": "wave sweep 0..2.6 is monotone",
+      "status": "PASS",
+      "detail": "['go', 'go', 'go', 'go', 'go', 'go', 'go', 'go', 'go', 'go', 'go', 'go', 'go', 'go', 'go', 'go', 'go', 'go', 'go', 'go', 'go', 'go', 'no_go', 'no_go', 'no_go', 'no_go', 'no_go', 'no_go', 'no_go', 'no_go', 'no_go', 'no_go', 'no_go', 'no_go', 'no_go', 'no_go', 'no_go', 'no_go', 'no_go', 'no_go', 'no_go', 'no_go', 'no_go', 'no_go', 'no_go', 'no_go', 'no_go', 'no_go', 'no_go', 'no_go', 'no_go', 'no_go', 'no_go']"
+    },
+    {
+      "type": "check",
+      "name": "visibility sweep is monotone in hazard",
+      "status": "PASS",
+      "detail": "['no_go', 'no_go', 'no_go', 'no_go', 'no_go', 'no_go', 'no_go', 'no_go', 'go', 'go', 'go', 'go']"
+    },
+    {
+      "type": "check",
+      "name": "gust sweep 10..80 is monotone",
+      "status": "PASS",
+      "detail": "['go', 'go', 'go', 'go', 'go', 'go', 'go', 'go', 'go', 'go', 'go', 'go', 'go', 'go', 'go', 'go', 'go', 'go', 'go', 'go', 'go', 'go', 'go', 'go', 'go', 'go', 'go', 'go', 'go', 'go', 'go', 'go', 'no_go', 'no_go', 'no_go', 'no_go', 'no_go', 'no_go', 'no_go', 'no_go', 'no_go', 'no_go', 'no_go', 'no_go', 'no_go', 'no_go', 'no_go', 'no_go', 'no_go', 'no_go', 'no_go', 'no_go', 'no_go', 'no_go', 'no_go', 'no_go', 'no_go', 'no_go', 'no_go', 'no_go', 'no_go', 'no_go', 'no_go', 'no_go', 'no_go', 'no_go', 'no_go', 'no_go', 'no_go', 'no_go', 'no_go']"
+    },
+    {
+      "type": "check",
+      "name": "fuzz: 3000 random datasets with zero invariant violations",
+      "status": "PASS",
+      "detail": "go=37 no_go=2963 reasons={'safety_hazard': 2546, 'conservative_uncertainty': 336, 'field_infeasible': 9, 'critical_data_missing': 72} violations=[]"
+    },
+    {
+      "type": "check",
+      "name": "fuzz: every caution-only NO_GO uses conservative_uncertainty",
+      "status": "PASS",
+      "detail": "residual=0; go=37 no_go=2963 reasons={'safety_hazard': 2546, 'conservative_uncertainty': 336, 'field_infeasible': 9, 'critical_data_missing': 72}"
+    },
+    {
+      "type": "check",
+      "name": "fuzz: no unexpected exceptions",
+      "status": "PASS",
+      "detail": ""
+    },
+    {
+      "type": "finding",
+      "name": "binary decisions remain safety-gated under fuzz",
+      "status": "FINDING",
+      "detail": "go=37 / 3000; no_go=2963; reasons={'safety_hazard': 2546, 'conservative_uncertainty': 336, 'field_infeasible': 9, 'critical_data_missing': 72}. Caution-only days require conservative NO_GO; no probability is inferred."
+    },
+    {
+      "type": "finding",
+      "name": "conservative_uncertainty is used when no GO safety window exists",
+      "status": "FINDING",
+      "detail": "Across 3000 randomized datasets CONSERVATIVE_UNCERTAINTY appeared 336 times; this includes caution-only days without a window that passed the safety gate."
+    },
+    {
+      "type": "check",
+      "name": "insufficient remaining hours raises InsufficientDataError",
+      "status": "PASS",
+      "detail": "raised cleanly"
+    },
+    {
+      "type": "check",
+      "name": "rank_spots orders go first and degrades errors without crashing",
+      "status": "PASS",
+      "detail": "order=['g', 'w', 's', 'g'] decisions=['go', 'no_go', 'no_go', 'no_go']"
+    },
+    {
+      "type": "check",
+      "name": "every all-day CAUTION scenario is NO_GO",
+      "status": "PASS",
+      "detail": "steady wind 33 km/h (caution band 32-44): no_go/conservative_uncertainty (hours ['caution']) | gust 43 km/h (caution band 42-58): no_go/conservative_uncertainty (hours ['caution']) | wave 1.2 m (caution band 1.10-1.85): no_go/conservative_uncertainty (hours ['caution']) | high UV 9 all day: no_go/conservative_uncertainty (hours ['caution']) | heavy rain 16 mm/h all day: no_go/conservative_uncertainty (hours ['caution']) | visibility 500 m (caution band 200-1000): no_go/conservative_uncertainty (hours ['caution']) | steep chop 0.7 m / 2.5 s (steepness caution): no_go/conservative_uncertainty (hours ['caution']) | onshore wind+wave combo (wind 25/gust 35/wave 1.0): no_go/conservative_uncertainty (hours ['caution']) | convective instability (cape 1500 + rain): no_go/conservative_uncertainty (hours ['caution']) | inconsistent wave direction: no_go/conservative_uncertainty (hours ['caution'])"
+    },
+    {
+      "type": "finding",
+      "name": "all-day caution is not a GO window",
+      "status": "FINDING",
+      "detail": "The product requires at least one safety-GO window; caution-only scenarios return NO_GO. steady wind 33 km/h (caution band 32-44): no_go/conservative_uncertainty (hours ['caution']) | gust 43 km/h (caution band 42-58): no_go/conservative_uncertainty (hours ['caution']) | wave 1.2 m (caution band 1.10-1.85): no_go/conservative_uncertainty (hours ['caution']) | high UV 9 all day: no_go/conservative_uncertainty (hours ['caution']) | heavy rain 16 mm/h all day: no_go/conservative_uncertainty (hours ['caution']) | visibility 500 m (caution band 200-1000): no_go/conservative_uncertainty (hours ['caution']) | steep chop 0.7 m / 2.5 s (steepness caution): no_go/conservative_uncertainty (hours ['caution']) | onshore wind+wave combo (wind 25/gust 35/wave 1.0): no_go/conservative_uncertainty (hours ['caution']) | convective instability (cape 1500 + rain): no_go/conservative_uncertainty (hours ['caution']) | inconsistent wave direction: no_go/conservative_uncertainty (hours ['caution'])"
+    }
+  ]
+}

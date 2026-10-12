@@ -34,6 +34,8 @@ DEFAULT_SERVERS = (
 )
 VERIFIED_MAX_COAST_M = 500.0
 ANGLE_TOLERANCE_DEG = 5.0
+MIN_COMPARABLE = int(os.getenv("PECHE_TN_LIVE_MIN_COMPARABLE", "10"))
+FETCH_ROUNDS = 3
 REFERENCE_RADIUS_M = 3000
 REPO_ROOT = Path(__file__).resolve().parents[3]
 
@@ -61,6 +63,18 @@ async def fetch_coastline_ways(client: httpx.AsyncClient, lat: float, lon: float
         except (httpx.HTTPError, ValueError):
             continue
     raise RuntimeError("no Overpass server answered")
+
+
+async def fetch_with_retries(client: httpx.AsyncClient, lat: float, lon: float) -> list[dict]:
+    last_error: RuntimeError | None = None
+    for attempt in range(FETCH_ROUNDS):
+        try:
+            return await fetch_coastline_ways(client, lat, lon)
+        except RuntimeError as error:
+            last_error = error
+            await asyncio.sleep(10 * (attempt + 1))
+    assert last_error is not None
+    raise last_error
 
 
 def reference_seaward_bearing(ways: list[dict], lat: float, lon: float) -> tuple[float, float]:
@@ -101,7 +115,21 @@ async def run_comparison() -> list[dict]:
         client = CoastOrientationClient(http_client=http_client, servers=servers())
         for name, lat, lon in preset_points():
             result = await client.resolve(lat, lon)
-            ways = await fetch_coastline_ways(http_client, lat, lon)
+            try:
+                ways = await fetch_with_retries(http_client, lat, lon)
+            except RuntimeError:
+                rows.append(
+                    {
+                        "spot": name,
+                        "status": result.status,
+                        "api_deg": result.orientation_deg,
+                        "reference_deg": None,
+                        "coast_m": None,
+                        "error_deg": None,
+                        "note": "overpass_unavailable",
+                    }
+                )
+                continue
             reference, coast_m = reference_seaward_bearing(ways, lat, lon)
             row = {
                 "spot": name,
@@ -110,6 +138,7 @@ async def run_comparison() -> list[dict]:
                 "reference_deg": None if math.isnan(reference) else round(reference, 1),
                 "coast_m": round(coast_m, 1),
                 "error_deg": None,
+                "note": "",
             }
             if (
                 result.status == "resolved"
@@ -125,19 +154,23 @@ async def run_comparison() -> list[dict]:
 def test_api_orientation_matches_osm_coastline_geometry() -> None:
     rows = asyncio.run(run_comparison())
 
-    print("\nspot | status | api_deg | reference_deg | coast_m | error_deg")
+    print("\nspot | status | api_deg | reference_deg | coast_m | error_deg | note")
     for row in rows:
         print(
             f"{row['spot']} | {row['status']} | {row['api_deg']} | "
-            f"{row['reference_deg']} | {row['coast_m']} | {row['error_deg']}"
+            f"{row['reference_deg']} | {row['coast_m']} | {row['error_deg']} | {row['note']}"
         )
 
     comparable = [row for row in rows if row["error_deg"] is not None]
+    unavailable = [row for row in rows if row["note"] == "overpass_unavailable"]
     print(
-        f"comparable (resolved and coast <= {VERIFIED_MAX_COAST_M:.0f} m): {len(comparable)}/{len(rows)}"
+        f"comparable (resolved and coast <= {VERIFIED_MAX_COAST_M:.0f} m): {len(comparable)}/{len(rows)}; "
+        f"overpass unavailable: {len(unavailable)}"
     )
 
-    assert comparable, "no preset produced a verified orientation to compare against OSM"
+    assert len(comparable) >= MIN_COMPARABLE, (
+        f"only {len(comparable)} spots could be compared; need at least {MIN_COMPARABLE}"
+    )
     worst = max(row["error_deg"] for row in comparable)
     assert worst <= ANGLE_TOLERANCE_DEG, (
         f"worst orientation error {worst}° exceeds {ANGLE_TOLERANCE_DEG}°"

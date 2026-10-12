@@ -1148,5 +1148,3 @@ test("Gemini key stays local, generation is explicit, and deterministic fallback
   await expect(gemini.getByTestId("gemini-key-input")).toHaveValue("");
   await expectNoPageOverflow(page);
 });
-Overflow(page);
-});

@@ -193,7 +193,7 @@ export function buildTripBlockers(result: DecisionResponse): TripBlockerRow[] {
       group: "سلامة",
       label: "جودة التوقع",
       tone: dataBlocks || result.cache_fallback_used ? "block" : result.confidence.score < 50 ? "caution" : "clear",
-      blocksGo: dataBlocks || result.cache_fallback_used,
+      blocksGo: dataBlocks || Boolean(result.cache_fallback_used),
       detail: result.cache_fallback_used
         ? "توقع قديم من الكاش — لا يُعتمد للتخطيط."
         : `اكتمال ${result.confidence.score}/100 (ليست دقة ميدانية).`,

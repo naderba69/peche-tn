@@ -11,7 +11,9 @@ import {
   Waves,
   Wind,
 } from "lucide-react";
-import { formatWindowRange, potentialLabels, speciesAvailabilityLabel, speciesAxisStatusLabel, springNeapLabel } from "@/lib/format";
+import { formatHour, formatWindowRange, potentialLabels, springNeapLabel } from "@/lib/format";
+import { SpeciesActivityBoard } from "@/components/SpeciesActivityBoard";
+import { buildTripBlockers } from "@/lib/tripBlockers";
 import type { DecisionResponse, HourDecision } from "@/lib/types";
 
 interface MiniReportProps {
@@ -21,18 +23,16 @@ interface MiniReportProps {
 /** وسوم وصفية إرشادية فقط — حدود القرار الفعلية تبقى في التقرير الكامل. */
 function windBucket(kmh: number | null): { label: string; level: "ok" | "watch" | "bad" } | null {
   if (kmh === null) return null;
-  if (kmh < 20) return { label: "هادئة", level: "ok" };
-  if (kmh < 30) return { label: "معتدلة", level: "ok" };
-  if (kmh < 40) return { label: "قوية", level: "watch" };
-  return { label: "عاصفة", level: "bad" };
+  if (kmh < 28) return { label: "تحت حد الحذر", level: "ok" };
+  if (kmh < 38) return { label: "حد حذر المحرك", level: "watch" };
+  return { label: "عند/فوق حد المنع", level: "bad" };
 }
 
 function waveBucket(m: number | null): { label: string; level: "ok" | "watch" | "bad" } | null {
   if (m === null) return null;
-  if (m < 0.5) return { label: "هادئ", level: "ok" };
-  if (m < 1.0) return { label: "متوسط", level: "ok" };
-  if (m < 2.0) return { label: "قوي", level: "watch" };
-  return { label: "هائج", level: "bad" };
+  if (m < 0.9) return { label: "تحت حد الحذر", level: "ok" };
+  if (m < 1.55) return { label: "حد حذر الرمل", level: "watch" };
+  return { label: "عند/فوق حد منع الرمل", level: "bad" };
 }
 
 function potentialLevel(p: "low" | "moderate" | "high" | "unknown"): "ok" | "watch" | "bad" {
@@ -43,7 +43,7 @@ function potentialLevel(p: "low" | "moderate" | "high" | "unknown"): "ok" | "wat
 }
 
 const reasonShort: Record<string, string> = {
-  safe_window: "نافذة اجتازت حدود المحرك",
+  safe_window: "ساعات بلا موانع محسوبة",
   safety_hazard: "خطر سلامة",
   field_infeasible: "استحالة تثبيت العتاد",
   critical_data_missing: "نقص بيانات حرجة",
@@ -129,22 +129,6 @@ export function MiniReport({ result }: MiniReportProps) {
   const gearLead = gear?.scenarios?.[0] ?? null;
   const foulingEvidence = result.fouling_evidence;
   const springNeap = result.spring_neap;
-  const speciesAxes = result.species_axes;
-  const speciesSummary = speciesAxes
-    ? speciesAxes.axes
-        .filter((axis) => axis.status !== "unknown")
-        .slice(0, 2)
-        .map((axis) => `${axis.label_ar}: ${speciesAxisStatusLabel(axis.status)}`)
-        .join(" · ")
-    : null;
-  const speciesMatchesSummary =
-    speciesAxes?.species_matches && speciesAxes.species_matches.length > 0
-      ? speciesAxes.species_matches
-          .filter((match) => match.status !== "unknown" && match.availability !== "unavailable")
-          .slice(0, 3)
-          .map((match) => `${match.label_ar} (${speciesAvailabilityLabel(match.availability)})`)
-          .join(" · ")
-      : null;
   const gearHint =
     holding === "high" || holding === "moderate"
       ? dominantHint ||
@@ -179,7 +163,7 @@ export function MiniReport({ result }: MiniReportProps) {
           <div className="mini-line mini-line-lead">
             <CalendarClock size={16} />
             <span>
-              <strong>أحسن وقت:</strong> <bdi>{formatWindowRange(leadWindow.start, leadWindow.end)}</bdi>
+              <strong>ساعات بلا موانع:</strong> <bdi>{formatWindowRange(leadWindow.start, leadWindow.end)}</bdi>
             </span>
           </div>
         ) : (
@@ -293,20 +277,13 @@ export function MiniReport({ result }: MiniReportProps) {
           </div>
         ) : null}
 
-        {speciesAxes ? (
+        {result.fisherman_report?.fish_forecasts?.length ? (
           <div className="mini-line mini-line-species">
-            <Fish size={16} />
-            <span>
-              <strong>الأنواع:</strong> {speciesAxes.label_ar}
-              {speciesMatchesSummary ? <small> — الأفضل توفراً: {speciesMatchesSummary}</small> : null}
-              {speciesSummary ? <small> — {speciesSummary}</small> : <small> — محاور أولية غير معايرة</small>}
-              {springNeap ? <small> · المدّ {springNeap.folk_label_ar}</small> : null}
-              {speciesAxes.sea_state_ar ? <small> · {speciesAxes.sea_state_ar}</small> : null}
-            </span>
+            <SpeciesActivityBoard rows={result.fisherman_report.fish_forecasts} compact />
           </div>
         ) : null}
 
-        {!isGo && avoidRange ? (
+        {avoidRange ? (
           <div className="mini-line mini-line-avoid">
             <TriangleAlert size={16} />
             <span>
@@ -315,18 +292,23 @@ export function MiniReport({ result }: MiniReportProps) {
           </div>
         ) : null}
 
-        {result.trip_ruin_factors && result.trip_ruin_factors.length > 0 ? (
-          <div className="mini-line mini-line-trip-ruin">
-            <TriangleAlert size={16} />
-            <span>
-              <strong>مفسدات الخرجة:</strong>{" "}
-              {result.trip_ruin_factors
-                .filter((f) => f.level === "high" || f.is_force_majeure)
-                .map((f) => f.label_ar)
-                .join(" · ") || "لا عامل مؤكد"}
-            </span>
-          </div>
-        ) : null}
+        {(() => {
+          const blockers = buildTripBlockers(result).filter((row) => row.blocksGo || row.tone === "caution");
+          if (!blockers.length) return null;
+          return (
+            <div className="mini-line mini-line-trip-ruin">
+              <TriangleAlert size={16} />
+              <span>
+                <strong>مفسدات الخرجة:</strong>{" "}
+                {blockers
+                  .map((row) =>
+                    `${row.label}${row.hourTime ? ` (${formatHour(row.hourTime)})` : ""}`,
+                  )
+                  .join(" · ")}
+              </span>
+            </div>
+          );
+        })()}
 
         <div className="mini-line mini-line-note">
           <Info size={15} />

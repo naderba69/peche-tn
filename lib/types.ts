@@ -719,6 +719,25 @@ export interface ReportPeriod {
   turbidity_ar: string;
   montage_ar: string;
   warnings_ar: string[];
+  gate_ar?: string;
+  open_range_ar?: string | null;
+  activity_ar?: string;
+  gabes_tide_ar?: string | null;
+  activity_score?: number | null;
+  species_top_ar?: string | null;
+  species_forecasts?: SpeciesForecast[];
+}
+
+export interface SpeciesForecast {
+  species: string;
+  label_ar: string;
+  score: number | null;
+  mode_ar: string;
+  drivers_ar: string[];
+  bait_ar: string;
+  coverage_pct?: number;
+  reliability_ar?: string;
+  unknowns_ar?: string[];
 }
 
 export interface AstronomicalTime {
@@ -752,6 +771,9 @@ export interface FishermanReport {
   beach_summary_ar: string;
   astronomical_times: AstronomicalTime[];
   astronomy_note_ar: string;
+  fish_forecast_headline_ar?: string;
+  fish_forecasts?: SpeciesForecast[];
+  fish_forecast_note_ar?: string;
   periods: ReportPeriod[];
   red_factors_ar: string[];
   green_factors_ar: string[];

@@ -246,10 +246,11 @@ def test_missing_visibility_is_critical_for_the_full_day(
             )
         )
     )
-    assert result.decision == DecisionLevel.NO_GO
+    assert result.decision == DecisionLevel.GO
     assert all(hour.safety == DecisionLevel.UNKNOWN for hour in result.hourly[:3])
     assert all(hour.safety == DecisionLevel.GO for hour in result.hourly[3:])
-    assert result.recommended_windows == []
+    assert result.recommended_windows
+    assert result.recommended_windows[0].start.hour == 3
 
 
 def test_stale_cache_fallback_is_a_hard_no_go(
@@ -369,7 +370,7 @@ def test_window_field_score_uses_weakest_hour_and_rank_is_conservative(
     assert window_ranks == sorted(window_ranks, reverse=True)
 
 
-def test_single_danger_period_makes_full_day_no_go_but_is_identified(
+def test_morning_blockers_do_not_veto_clear_evening(
     dataset_factory: Callable[..., ForecastDataset],
 ) -> None:
     def update(index: int, values: dict[str, object]) -> None:
@@ -383,10 +384,11 @@ def test_single_danger_period_makes_full_day_no_go_but_is_identified(
             start_at=datetime(2026, 9, 4, 0, tzinfo=ZoneInfo("Africa/Tunis")),
         )
     )
-    assert result.decision == DecisionLevel.NO_GO
+    assert result.decision == DecisionLevel.GO
     assert result.avoid_windows
     assert any(window.safety == DecisionLevel.NO_GO for window in result.avoid_windows)
-    assert result.recommended_windows == []
+    assert result.recommended_windows
+    assert all(window.end <= result.avoid_windows[0].start or window.start >= result.avoid_windows[0].end for window in result.recommended_windows)
 
 
 def test_localized_thunder_is_avoided_while_high_turbidity_proxy_stays_caution_only(
@@ -421,8 +423,8 @@ def test_localized_thunder_is_avoided_while_high_turbidity_proxy_stays_caution_o
 
     assert result.field_feasibility.turbidity_potential == PotentialLevel.MODERATE
     assert result.field_feasibility.turbidity_evidence_count == 3
-    assert result.decision == DecisionLevel.NO_GO
-    assert result.recommended_windows == []
+    assert result.decision == DecisionLevel.GO
+    assert result.recommended_windows
     assert any(window.start.hour == 17 for window in result.avoid_windows)
     assert any("ليس رصداً" in item for item in result.field_feasibility.limitations_ar)
 
@@ -481,7 +483,7 @@ def test_partial_history_is_reported_but_not_treated_as_persistence_or_critical_
     assert first.field_feasibility.confidence < 50
     assert result.decision == DecisionLevel.GO
     assert result.decision_reason_code == DecisionReasonCode.SAFE_WINDOW
-    assert "1/48" in first.field_feasibility.reasons_ar[1]
+    assert any("1/48" in reason for reason in first.field_feasibility.reasons_ar)
 
 
 def test_previous_rain_and_persistent_onshore_energy_raise_transport_screen(
@@ -1139,3 +1141,26 @@ def test_alongshore_wind_channel_is_visible_to_the_holding_gate(
     assert result.field_feasibility.holding_breakdown is not None
     assert result.field_feasibility.holding_breakdown.longshore_current == PotentialLevel.MODERATE
     assert result.field_feasibility.score < 100
+
+
+def test_east_short_period_chop_raises_holding_unlike_north(
+    dataset_factory: Callable[..., ForecastDataset],
+) -> None:
+    chop = {
+        "wave_height_m": 1.48,
+        "wave_period_s": 5.0,
+        "wave_direction_deg": 90.0,
+        "wind_speed_kmh": 14.0,
+        "wind_gust_kmh": 18.0,
+    }
+    north_data = dataset_factory(hour_updates=chop)
+    east_data = dataset_factory(hour_updates=chop).model_copy(
+        update={
+            "location": north_data.location.model_copy(update={"latitude": 35.7, "longitude": 10.9}),
+        }
+    )
+    north = engine.evaluate(north_data)
+    east = engine.evaluate(east_data)
+    assert north.field_feasibility.holding_difficulty != PotentialLevel.HIGH
+    assert east.field_feasibility.holding_difficulty == PotentialLevel.HIGH
+    assert any("قطار أعشاب" in reason for reason in east.hourly[0].field_feasibility.reasons_ar)

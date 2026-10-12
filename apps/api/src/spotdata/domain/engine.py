@@ -45,6 +45,7 @@ from .math import (
     dominant_wind_direction_deg,
     gust_factor,
     in_gabes_zone,
+    tunisian_regime,
     incoming_direction_components,
     incoming_direction_signed_components,
     kmh_to_mps,
@@ -119,7 +120,7 @@ from .species import (
 
 TUNIS_TZ = ZoneInfo("Africa/Tunis")
 
-ENGINE_VERSION = "1.10.2"
+ENGINE_VERSION = "1.11.7"
 
 # --------------------------------------------------------------------------- #
 # Trip-ruining factor thresholds (v1.9.8, evidence-gated; see SOURCES-AUDIT §3.6)
@@ -133,6 +134,8 @@ ENGINE_VERSION = "1.10.2"
 # --------------------------------------------------------------------------- #
 _CHL_BLOOM_MODERATE_MG_M3 = 5.0
 _CHL_BLOOM_DENSE_MG_M3 = 10.0
+_CHL_BLOOM_MODERATE_GABES_MG_M3 = 8.0
+_CHL_BLOOM_DENSE_GABES_MG_M3 = 18.0
 _CHL_FORCE_MAJEURE_MAX_AGE_HOURS = 48.0
 _SATELLITE_DECISION_MAX_AGE_HOURS = 72.0
 _SATELLITE_ARCHIVE_AGE_HOURS = 168.0
@@ -140,24 +143,23 @@ _TUR_MODERATE_FNU = 2.0
 _TUR_HIGH_FNU = 5.0
 _MHW_MODERATE_ANOMALY_C = 2.0
 _MHW_STRONG_ANOMALY_C = 3.0
-# Reviewable monthly reference SST (°C) for Tunisian coastal waters.
-_COASTAL_SST_CLIMATOLOGY_C = (
-    14.5,
-    14.0,
-    14.8,
-    16.2,
-    18.5,
-    21.8,
-    24.8,
-    26.4,
-    25.6,
-    22.8,
-    19.2,
-    16.2,
-)
+# Monthly coastal SST climatology (°C) by Tunisian zone — Gabès/south run
+# several degrees warmer in summer than the north coast.
+_SST_CLIMATOLOGY_BY_ZONE: dict[str, tuple[float, ...]] = {
+    "northwest": (14.2, 13.8, 14.5, 16.0, 18.2, 21.5, 24.2, 25.6, 24.8, 22.0, 18.5, 15.8),
+    "bizerte_tunis": (14.5, 14.0, 14.8, 16.2, 18.5, 21.8, 24.8, 26.4, 25.6, 22.8, 19.2, 16.2),
+    "cap_bon_hammamet": (14.8, 14.4, 15.0, 16.5, 19.0, 22.5, 25.5, 27.0, 26.2, 23.2, 19.5, 16.5),
+    "sahel": (15.0, 14.6, 15.2, 16.8, 19.5, 23.0, 26.2, 27.5, 26.8, 23.8, 20.0, 16.8),
+    "gabes": (15.5, 15.0, 15.8, 17.5, 20.5, 24.5, 27.5, 28.8, 27.8, 24.5, 20.5, 17.2),
+    "south": (15.8, 15.2, 16.0, 17.8, 21.0, 25.0, 28.0, 29.2, 28.2, 24.8, 20.8, 17.5),
+}
+_COASTAL_SST_CLIMATOLOGY_C = _SST_CLIMATOLOGY_BY_ZONE["bizerte_tunis"]
 
 
 FULL_DAY_SESSION_HOURS = 24
+# Consecutive hours without a calculated blocker. A blocked morning must not
+# veto a clear evening; the day is not one 24-hour all-or-nothing window.
+MIN_OPEN_WINDOW_HOURS = 2
 
 
 class InsufficientDataError(ValueError):
@@ -295,6 +297,7 @@ def _species_hour_activity(
     moon_illumination: float | None = None,
     tide_delta: int = 0,
     lunar_day_delta: int = 0,
+    target_species: TargetSpecies | None = None,
 ) -> tuple[int, list[tuple[str, int]]]:
     """Relative activity score (0-100) for one species at one hour.
 
@@ -340,69 +343,53 @@ def _species_hour_activity(
         if fit == "favorable":
             score += 5
             contributions.append(("حالة البحر مناسبة", 5))
-    # Day-level shore-proximity from the modelled spring/neap (sea-level series,
-    # D9): spring (حيّة) means stronger water movement pulling fish shoreward.
     if tide_delta:
         score += tide_delta
         contributions.append(
             (
-                "مد قوي: سمك أقرب للشاطئ" if tide_delta > 0 else "مد ضعيف: سمك أبعد عن الشاطئ",
+                "مد صاعد على مسطح قابس" if tide_delta > 0 else "جزر على مسطح قابس يبعد السمك",
                 tide_delta,
             )
         )
-    # Traditional lunar-day prior (أيام حياة/موت): the folk calendar keys on the
-    # days near the new/full moon. Disclosed folklore, kept small (+2), never the
-    # D9 spring/neap derivation and never a decision input.
-    if lunar_day_delta:
-        score += lunar_day_delta
-        contributions.append(("يوم قمري قرب البدر/المحاق (قرينة شعبية)", lunar_day_delta))
-    # 3-hour pressure trend, computed from the modelled hPa series: a gently
-    # falling barometer precedes frontal activity; a sharp rise follows it.
-    # Disclosed as an uncalibrated prior — the *value* is data, the weight is not.
-    pressure_change_3h = hour.derived.pressure_change_3h_hpa
-    if pressure_change_3h is not None:
-        if pressure_change_3h <= -1.0:
-            score += 3
-            contributions.append(("هبوط ضغط 3س", 3))
-        elif pressure_change_3h >= 1.5:
-            score -= 3
-            contributions.append(("صعود ضغط 3س", -3))
-    # Moonlit night: the light channel (moonlight aids nocturnal feeding sight).
-    # Astronomically computed; night-only, so daytime is unaffected. Note: within
-    # the ±90 min twilight margin after sunset, is_night is still True, so a
-    # bright moon can co-occur with the twilight bonus above — a documented small
-    # overlap, not an error (audit 2026-09-14, item C6).
-    if hour.derived.is_night and moon_illumination is not None and moon_illumination >= 0.7:
-        score += 3
-        contributions.append(("ليلة مقمرة", 3))
+    del lunar_day_delta  # folk calendar excluded from the score
+    del moon_illumination, target_species  # moonlight is astronomy, not feeding
+    # Pressure tendency is weather context only (catalog 1.8–1.10): never a catch weight.
     return max(0, min(100, score)), contributions
 
 
 def _tide_channel_delta(classification: str) -> int:
-    """Day-level shore-proximity delta from the modelled spring/neap (D9/D11).
+    """Spring/neap must not imply fish distance from the beach.
 
-    The classification is computed from the sea-level series only (never the
-    moon phase); spring = stronger movement = fish pushed shoreward (+3), neap =
-    calmer sea (-3). The *value* is data, the weight is a disclosed prior.
+    A spring day in Gabès can expose kilometres of flats at low water (fish
+    follow the water *away* from the standing point). Outside Gabès the
+    modelled range is noise. Day-level classification therefore scores 0.
     """
-    if classification == "spring":
-        return 3
-    if classification == "neap":
-        return -3
+    del classification
     return 0
 
 
 def _lunar_day_delta(illumination: float) -> int:
-    """Traditional 'أيام حياة/موت' lunar-day prior, disclosed and uncalibrated.
-
-    The folk calendar treats the days around the new and full moon as living
-    days. Kept as a small folklore prior (+2) explicitly separate from the D9
-    spring/neap derivation; it never feeds the binary decision or any safety
-    gate. Thresholds ±0.12 illumination ≈ ~2 days around each syzygy.
-    """
-    if illumination >= 0.88 or illumination <= 0.12:
-        return 2
+    """Folk lunar-day calendar is excluded from scoring (catalog 3.1 / 3.6)."""
+    del illumination
     return 0
+
+
+def _gabes_tide_hour_delta(tide_state: TideState, *, gabes: bool) -> int:
+    """Hourly Gabès flood can bring fish over the flats; ebb on a big tide pulls them off."""
+    if not gabes:
+        return 0
+    if tide_state == TideState.RISING:
+        return 3
+    if tide_state == TideState.FALLING:
+        return -3
+    return 0
+
+
+def _chl_bloom_thresholds(latitude: float, longitude: float) -> tuple[float, float]:
+    zone = tunisian_zone(latitude, longitude)
+    if zone in {"gabes", "south"}:
+        return _CHL_BLOOM_MODERATE_GABES_MG_M3, _CHL_BLOOM_DENSE_GABES_MG_M3
+    return _CHL_BLOOM_MODERATE_MG_M3, _CHL_BLOOM_DENSE_MG_M3
 
 
 def _activity_top_factor(contributions: list[tuple[str, int]]) -> str:
@@ -418,6 +405,20 @@ def _activity_factors_ar(contributions: list[tuple[str, int]]) -> list[str]:
     return [f"{label} {delta:+d}" for label, delta in ordered]
 
 
+def _activity_period_key(item: HourActivity) -> str:
+    """Map an hour to a light-based bucket, not a fixed winter clock."""
+    hour = item.time.hour
+    if item.is_twilight:
+        return "dawn" if hour < 12 else "dusk"
+    if item.is_night:
+        return "night"
+    if hour < 11:
+        return "morning"
+    if hour < 14:
+        return "midday"
+    return "afternoon"
+
+
 def _activity_periods(
     entries: list[tuple[HourActivity, list[tuple[str, int]]]],
 ) -> list[PeriodActivity]:
@@ -426,8 +427,14 @@ def _activity_periods(
         members = [
             (item, contributions)
             for item, contributions in entries
-            if _in_activity_period(item.time.hour, from_hour, to_hour)
+            if _activity_period_key(item) == key
         ]
+        if not members:
+            members = [
+                (item, contributions)
+                for item, contributions in entries
+                if _in_activity_period(item.time.hour, from_hour, to_hour)
+            ]
         if not members:
             periods.append(PeriodActivity(key=key, label_ar=label, range_ar=range_ar, score=None))
             continue
@@ -449,14 +456,12 @@ def _activity_periods(
 
 def _activity_basis_ar(profile: SpeciesProfile) -> list[str]:
     lines = [
-        "مؤشر نشاط نسبي (0-100) يبدأ من 50 ويجمع أوزاناً أولية موثقة: نافذة التغذية (غسق/ليل)، حرارة الماء، التوفر الموسمي من دراسات منشورة (الأثقل)، توافق القاع، حالة البحر، المد اليومي (حيّة/مات) من سلسلة مستوى البحر، اليوم القمري قرب البدر/المحاق (قرينة شعبية)، اتجاه الضغط خلال 3 ساعات من سلسلة hPa، وإضاءة القمر ليلاً (حساب فلكي).",
+        "مؤشر نشاط نسبي (0-100) يبدأ من 50: نافذة تغذية فلكية، حرارة الماء، توفر موسمي من دراسات (ليس ذروة تبييض)، توافق القاع، حالة بحر مناسبة للنوع. الضغط والقمر الشعبي خارج التنقيط. في خليج قابس فقط يُحتسب طور المد الساعي.",
     ]
     if profile.label_ar == "صيد عام":
-        lines.append(
-            "صيد عام بلا ملف موسمي أو حراري أو قاع: يدخل في مؤشره بونص الغسق والليل والمد واليوم القمري والضغط وإضاءة القمر."
-        )
+        lines.append("صيد عام بلا ملف موسمي أو حراري أو قاع: تعديل نشاط الشفق/الليل فقط، لا يغيّر اذهب/لا تذهب.")
     lines.append(
-        "هذا مؤشر ترتيب نسبي وليس احتمالاً إحصائياً لوجود السمك أو وعداً بالمصيد؛ أوزان المد واليوم القمري والضغط وإضاءة القمر قرائن غير معايرة بقيم محسوبة من الداتا، وتحويل المؤشر كله إلى نسبة يتطلب سجل مصيد تونسي معايراً يشمل الحصص الصفرية."
+        "ترتيب نسبي وليس احتمالاً ولا وعداً بالمصيد. المعايرة تحتاج سجل حصص تونسي يشمل الأصفار."
     )
     return lines
 
@@ -564,7 +569,7 @@ class DecisionEngine:
                 f"قبل تطبيق مانع نوع الساحل، ظهرت {pre_gate_candidate_count} نافذة مرشحة من فحص الطقس والتنفيذ؛ "
                 "هذه ليست توصية خروج ولا GO نهائياً."
                 if pre_gate_candidate_count
-                else "قبل تطبيق مانع نوع الساحل، لم تظهر نافذة متصلة لمدة 24 ساعة اجتازت فحص الطقس والتنفيذ."
+                else "قبل تطبيق مانع نوع الساحل، لم تظهر نافذة ساعات متصلة بلا موانع محسوبة."
             )
             decision = DecisionLevel.NO_GO
             decision_reason_code = DecisionReasonCode.CRITICAL_DATA_MISSING
@@ -842,7 +847,7 @@ class DecisionEngine:
             ranked=ranked,
             official_warning_check=official_warning_check,
             notes_ar=[
-                "الترتيب من الأحسن إلى الأضعف: القرار الثنائي أولاً ثم قابلية التنفيذ ثم مؤشر الفرصة النسبي.",
+                "الترتيب: بقع اذهب أولاً ثم لا تذهب. داخل كل مجموعة التنفيذ ثم الترتيب النسبي — لا يفتح بقعة ممنوعة.",
                 "مؤشر الفرصة ترتيب نسبي وليس احتمال مصيد؛ ومعطيات كل بقعة نماذج أفقية نحو 8 كم وتحتاج معاينة ميدانية قبل القرار.",
             ],
         )
@@ -1226,6 +1231,8 @@ class DecisionEngine:
             holding_points += 1
         if derived.wave_incidence == WaveIncidence.ALONGSHORE:
             holding_points += 3
+            if hour.wave_height_m >= 0.7:
+                holding_points += 2
         elif derived.wave_incidence == WaveIncidence.OBLIQUE:
             holding_points += 2
         if derived.alongshore_wave_proxy is not None:
@@ -1244,6 +1251,14 @@ class DecisionEngine:
             and derived.wind_alongshore_component_kmh >= 15
         ):
             holding_points += 1
+        regime = tunisian_regime(dataset.location.latitude, dataset.location.longitude)
+        if (
+            regime in {"east", "gabes"}
+            and hour.wave_period_s is not None
+            and hour.wave_period_s < 6
+            and hour.wave_height_m >= 1.45
+        ):
+            holding_points += 3
         holding = _potential_level(holding_points, moderate_at=3, high_at=6)
         # A summary that sits below its own most-severe displayed cause is the
         # "منخفض/100 بجوار متوسط" contradiction (audit 2026-09-14, round 3).
@@ -1387,9 +1402,9 @@ class DecisionEngine:
         # of "مريحة ميدانياً" when the breakdown says متوسط).
         status = (
             FieldFeasibilityLevel.DIFFICULT
-            if holding == PotentialLevel.HIGH
+            if holding == PotentialLevel.HIGH or turbidity == PotentialLevel.HIGH
             else FieldFeasibilityLevel.WORKABLE
-            if holding == PotentialLevel.MODERATE
+            if holding == PotentialLevel.MODERATE or turbidity == PotentialLevel.MODERATE
             else FieldFeasibilityLevel.FAVORABLE
             if score >= 75
             else FieldFeasibilityLevel.WORKABLE
@@ -1438,7 +1453,9 @@ class DecisionEngine:
             if derived.wave_energy_integral_48h is None
             else f"{derived.wave_energy_integral_48h:.1f} (Hs²T·h نسبي)"
         )
+        regime_ar = {"north": "شمال", "east": "شرق", "gabes": "قابس/جنوب"}[regime]
         reasons = [
+            f"جهة الساحل المعتمدة في نفس المحرك: {regime_ar}.",
             f"صعوبة تثبيت الخط: {_potential_label_ar(holding)}.",
             f"مؤشر النقل النموذجي للصوفة/الحطام: {_potential_label_ar(fouling)} لا رصد وجود؛ {fouling_evidence_count} عائلات قرائن تشغيلية مختلفة خلال 48 ساعة (وليست أرصاداً أو مصادر مستقلة)، مطر {rain_text} ({derived.rain_data_hours_48h}/48)، وريح بحرية {wind_fraction_text} ({derived.wind_data_hours_48h}/48)، وطاقة موج تراكمية {energy_text} ({derived.wave_energy_data_hours_48h}/48).",
             f"مؤشر ظروف التعكير النموذجي: {_potential_label_ar(turbidity)} لا قياس NTU؛ {turbidity_evidence_count} عائلات قرائن تشغيلية مختلفة خلال 48 ساعة، وليست قياسات مستقلة للماء.",
@@ -1456,6 +1473,15 @@ class DecisionEngine:
         if derived.wave_incidence == WaveIncidence.INCONSISTENT:
             reasons.append(
                 "اتجاه الشاطئ مشتبه به (الموج قادم من جهة غير بحرية)؛ تقدير الجرّ الجانبي ودفع الريح الموازي غير موثوق حتى يتحقق المستخدم من جهة البحر ميدانياً."
+            )
+        if (
+            regime in {"east", "gabes"}
+            and hour.wave_period_s is not None
+            and hour.wave_period_s < 6
+            and hour.wave_height_m >= 1.45
+        ):
+            reasons.append(
+                "موج قصير الفترة مع ارتفاع معتبر على الشرق/قابس: قطار أعشاب محتمل يُحتسب في صعوبة التثبيت، ليس مكافأة كسرة."
             )
         return FieldFeasibilityResult(
             status=status,
@@ -1491,6 +1517,8 @@ class DecisionEngine:
         longshore_points = 0
         if derived.wave_incidence == WaveIncidence.ALONGSHORE:
             longshore_points += 3
+            if hour.wave_height_m is not None and hour.wave_height_m >= 0.7:
+                longshore_points += 2
         elif derived.wave_incidence == WaveIncidence.OBLIQUE:
             longshore_points += 2
         if derived.alongshore_wave_proxy is not None:
@@ -2169,77 +2197,122 @@ class DecisionEngine:
                 )
             )
 
+        species = SPECIES_PROFILES[dataset.angler.target_species]
         if hour.wave_height_m is not None:
-            if hour.wave_height_m < 0.15:
-                context(
-                    "flat_sea_context",
-                    "بحر شبه مسطح",
-                    f"{hour.wave_height_m:.2f} م",
-                    "لا يُخصم تلقائياً: أثر البحر المسطح يتغير مع الضوء وشفافية الماء والهدف، وشفافية الماء غير مقاسة.",
-                    basis=FactorBasis.MODEL_FORECAST,
-                )
-            elif hour.wave_height_m < 0.35:
-                add(
-                    "light_water_movement",
-                    "حركة ماء خفيفة",
-                    2,
-                    f"{hour.wave_height_m:.2f} م",
-                    "وزن أولي صغير لحركة الماء؛ يحتاج معايرة بمصيد محلي ولا يثبت نشاط السمك.",
-                )
-            elif hour.wave_height_m <= 1.0:
-                add(
-                    "useful_wave_band",
-                    "حركة موج مناسبة للسيرفكاست",
-                    12,
-                    f"{hour.wave_height_m:.2f} م",
-                    "نطاق تشغيلي أولي للسيرفكاست بعد بوابة السلامة؛ علاقته بالمصيد غير معايرة محلياً.",
-                )
-            elif hour.wave_height_m <= 1.3:
+            hs = hour.wave_height_m
+            target = dataset.angler.target_species
+            if hs < 0.15:
+                if target == TargetSpecies.STRIPED_SEABREAM:
+                    add(
+                        "calm_preferred_species",
+                        "بحر هادئ يناسب المرمار",
+                        6,
+                        f"{hs:.2f} م",
+                        "قاعي ضحل يفضّل الغسل الهادئ؛ ليست ضمان مصيد.",
+                    )
+                else:
+                    context(
+                        "flat_sea_context",
+                        "بحر شبه مسطح",
+                        f"{hs:.2f} م",
+                        "لا يُخصم تلقائياً: أثر البحر المسطح يتغير مع الضوء والهدف، وشفافية الماء غير مقاسة.",
+                        basis=FactorBasis.MODEL_FORECAST,
+                    )
+            elif hs <= 0.55:
+                if target in {TargetSpecies.STRIPED_SEABREAM, TargetSpecies.GILTHEAD_SEABREAM}:
+                    add(
+                        "quiet_wave_band",
+                        "حركة خفيفة مناسبة للقاعيات",
+                        8,
+                        f"{hs:.2f} م",
+                        "نطاق أولي للوراطة/المرمار؛ القاروص أضعف هنا.",
+                    )
+                elif target == TargetSpecies.EUROPEAN_SEABASS:
+                    add(
+                        "too_quiet_for_bass",
+                        "كسرة أضعف من تفضيل القاروص",
+                        -2,
+                        f"{hs:.2f} م",
+                        "القاروص يفضّل كسرة معتدلة لا ماء ساكن.",
+                    )
+                else:
+                    add(
+                        "light_water_movement",
+                        "حركة ماء خفيفة",
+                        2,
+                        f"{hs:.2f} م",
+                        "وزن أولي صغير لحركة الماء.",
+                    )
+            elif hs <= 1.05:
+                if target in {TargetSpecies.EUROPEAN_SEABASS, TargetSpecies.WHITE_SEABREAM}:
+                    add(
+                        "useful_wave_band",
+                        "كسرة معتدلة مناسبة للهدف",
+                        10,
+                        f"{hs:.2f} م",
+                        "نطاق تشغيلي بعد بوابة السلامة للقاروص/السار؛ غير معاير محلياً.",
+                    )
+                elif target == TargetSpecies.STRIPED_SEABREAM:
+                    add(
+                        "wave_above_mormyrus",
+                        "موج أعلى من تفضيل المرمار",
+                        -4,
+                        f"{hs:.2f} م",
+                        "المرمار قاعي ضحل؛ الكسرة المتوسطة تصعّب الغسل الهادئ.",
+                    )
+                else:
+                    add(
+                        "useful_wave_band",
+                        "حركة موج قابلة للسيرفكاست",
+                        8,
+                        f"{hs:.2f} م",
+                        "نطاق تشغيلي عام بعد بوابة السلامة.",
+                    )
+            elif hs <= 1.3:
                 add(
                     "energetic_wave_band",
-                    "موج نشيط",
-                    4,
-                    f"{hour.wave_height_m:.2f} م",
-                    "وزن أولي محدود؛ الأثر الفعلي يتوقف على الكسرة والقاع والهدف ويحتاج تحققاً محلياً.",
+                    "موج نشيط يصعّب التثبيت",
+                    -6,
+                    f"{hs:.2f} م",
+                    "قرب حدود السلامة: قراءة الضربة والرصاص أصعب.",
+                    rule_nature=RuleNature.OPERATIONAL_PROXY,
                 )
             else:
                 add(
                     "excess_wave_energy",
-                    "طاقة موج مرتفعة",
-                    -12,
-                    f"{hour.wave_height_m:.2f} م",
-                    "تثبيت الرصاص وقراءة الضربة يصبحان أصعب كفرضية تشغيلية تحتاج تحققاً في الرمية الأولى.",
+                    "طاقة موج مرتفعة — صيد شبه متعذر",
+                    -16,
+                    f"{hs:.2f} م",
+                    "تثبيت الرصاص وقراءة الضربة ينهاران عملياً.",
                     rule_nature=RuleNature.OPERATIONAL_PROXY,
                 )
 
         if hour.wind_speed_kmh is not None:
             relation_label = WIND_RELATION_AR[derived.wind_relation]
-            if derived.wind_relation == WindRelation.ONSHORE and 5 <= hour.wind_speed_kmh <= 22:
+            if derived.wind_relation == WindRelation.OFFSHORE and 5 <= hour.wind_speed_kmh <= 18:
                 add(
-                    "light_onshore_wind",
-                    "رياح بحرية خفيفة",
-                    7,
+                    "light_offshore_wind",
+                    "رياح برية خفيفة تسهّل الرمي",
+                    5,
                     f"{hour.wind_speed_kmh:.0f} كم/س — {relation_label}",
-                    "prior منخفض الوزن لحركة سطح قابلة للتعامل؛ لا يثبت زيادة المصيد.",
+                    "في المتوسط غالباً تصفّي السطح وتسهّل القوس؛ ليست زيادة مصيد مثبتة.",
                 )
-            elif (
-                derived.wind_relation == WindRelation.CROSS_ONSHORE
-                and 5 <= hour.wind_speed_kmh <= 20
-            ):
+            elif derived.wind_relation == WindRelation.ONSHORE and hour.wind_speed_kmh >= 14:
                 add(
-                    "light_cross_onshore_wind",
-                    "رياح جانبية بحرية خفيفة",
-                    4,
+                    "onshore_wind_transport",
+                    "رياح بحرية تجلب عكارة/أعشاب",
+                    -4 if hour.wind_speed_kmh >= 18 else -2,
                     f"{hour.wind_speed_kmh:.0f} كم/س — {relation_label}",
-                    "prior تشغيلي أولي منخفض الوزن؛ أثره على الرمي والمصيد يحتاج بيانات محلية.",
+                    "على الساحل التونسي البحرية تبني الموج والصوفة أكثر مما «تنشّط» السمك.",
+                    rule_nature=RuleNature.OPERATIONAL_PROXY,
                 )
             elif hour.wind_speed_kmh > 30:
                 add(
                     "difficult_casting_wind",
                     "رياح تعقّد الرمي",
-                    -9,
+                    -12,
                     f"{hour.wind_speed_kmh:.0f} كم/س — {relation_label}",
-                    "التحكم في القوس والخيط وحساسية الضربة قد يتراجع؛ التقدير لا يعرف العتاد أو قدرة الرامي.",
+                    "التحكم في القوس والخيط وحساسية الضربة يتراجع بقوة.",
                     rule_nature=RuleNature.OPERATIONAL_PROXY,
                 )
 
@@ -2273,26 +2346,27 @@ class DecisionEngine:
         if derived.wave_incidence == WaveIncidence.DIRECT:
             add(
                 "direct_wave_incidence",
-                "الموج داخل على البقعة مباشرة",
-                3,
+                "موج مباشر (تكسر عمودي)",
+                -2,
                 WAVE_INCIDENCE_AR[derived.wave_incidence],
-                "prior اتجاهي صغير؛ النموذج لا يرى التحول والانكسار أمام الشاطئ.",
+                "التكسّر العمودي يصعّب التثبيت أكثر من المائل؛ النموذج لا يرى الانكسار المحلي.",
+                rule_nature=RuleNature.OPERATIONAL_PROXY,
             )
         elif derived.wave_incidence == WaveIncidence.OBLIQUE:
             add(
                 "oblique_wave_incidence",
-                "الموج مائل على الشاطئ",
-                3,
+                "الموج مائل يبني قناة طولية",
+                5,
                 WAVE_INCIDENCE_AR[derived.wave_incidence],
-                "prior اتجاهي صغير غير معاير؛ قد يترافق أيضاً مع جرّ الخيط ويحتاج معاينة.",
+                "زاوية مائلة أنسب لتغذية الكسرة من التكسّر المباشر، مع جرّ خط محتمل.",
             )
         elif derived.wave_incidence == WaveIncidence.ALONGSHORE:
             add(
                 "alongshore_wave_incidence",
-                "موج جانبي",
-                -5,
+                "موج جانبي يجرف الرصاص",
+                -8,
                 WAVE_INCIDENCE_AR[derived.wave_incidence],
-                "يرفع مؤشر جرّ الرصاص والخيط على طول الساحل؛ الرمية الاختبارية هي الحكم.",
+                "يرفع جرّ الرصاص والخيط على طول الساحل حتى يتعذر الصيد.",
                 rule_nature=RuleNature.OPERATIONAL_PROXY,
             )
 
@@ -2321,50 +2395,65 @@ class DecisionEngine:
                 rule_nature=RuleNature.OPERATIONAL_PROXY,
             )
 
-        if derived.tide_movement_index is not None:
-            if derived.tide_movement_index >= 0.35:
+        gabes = in_gabes_zone(dataset.location.latitude, dataset.location.longitude)
+        if gabes and derived.tide_movement_index is not None:
+            if derived.tide_state == TideState.RISING and derived.tide_movement_index >= 0.35:
                 add(
-                    "modelled_water_level_movement",
-                    "حركة واضحة في مستوى البحر",
-                    6,
+                    "gabes_flood_tide",
+                    "مد صاعد على مسطح قابس",
+                    4,
                     TIDE_STATE_AR[derived.tide_state],
-                    "prior منخفض الوزن مبني على تغير مستوى البحر النموذجي، لا توقيت قمري ولا احتمال مصيد.",
+                    "في قابس فقط: الماء يغمر المسطح فيقرّب السمك من نقطة الوقوف. ليس سولونار.",
                 )
-            elif derived.tide_state == TideState.SLACK:
+            elif derived.tide_state == TideState.FALLING and derived.tide_movement_index >= 0.35:
                 add(
-                    "modelled_slack_water",
-                    "حركة مستوى البحر ضعيفة",
-                    -3,
+                    "gabes_ebb_tide",
+                    "جزر يبعد السمك على مسطح قابس",
+                    -4,
                     TIDE_STATE_AR[derived.tide_state],
-                    "مؤشر الحركة في النموذج قريب من السكون المحلي لليوم.",
+                    "الجزر الحيّ يكشف المسطحات فيتبع السمك الماء بعيداً عن الرمية.",
                 )
+        elif derived.tide_movement_index is not None:
+            context(
+                "microtidal_level_context",
+                "تغير مستوى بحر نموذجي",
+                TIDE_STATE_AR[derived.tide_state],
+                "خارج خليج قابس المدّ سنتمترات؛ الحركة النموذجية سياق وليست فرصة مصيد.",
+            )
 
         if hour.ocean_current_velocity_kmh is not None:
-            if 0.15 <= hour.ocean_current_velocity_kmh <= 1.5:
-                add(
-                    "moderate_model_current",
-                    "تيار بحري نموذجي متوسط",
-                    5,
-                    f"{hour.ocean_current_velocity_kmh:.2f} كم/س",
-                    "prior منخفض الوزن غير معاير؛ التيار البحري النموذجي لا يمثل بالضرورة تيار منطقة الكسرة.",
-                )
-            elif hour.ocean_current_velocity_kmh > 2.0:
+            if hour.ocean_current_velocity_kmh > 1.8:
                 add(
                     "strong_model_current",
-                    "تيار نموذجي قوي",
-                    -5,
+                    "تيار نموذجي يجرف الرصاص",
+                    -10,
                     f"{hour.ocean_current_velocity_kmh:.2f} كم/س",
-                    "قد يصعّب تثبيت الخط، لكن دقة النموذج قرب الساحل محدودة ولا تمثل منطقة الكسرة.",
+                    "تيار قوي بما يكفي لرمي الرصاص خارج المرمى؛ الدقة الساحلية محدودة.",
                     rule_nature=RuleNature.OPERATIONAL_PROXY,
+                )
+            elif gabes and 0.3 <= hour.ocean_current_velocity_kmh <= 1.8:
+                add(
+                    "gabes_model_current",
+                    "تيار مدّي نموذجي في قابس",
+                    3,
+                    f"{hour.ocean_current_velocity_kmh:.2f} كم/س",
+                    "في قابس التيار المدّي حقيقي أكثر من شمال تونس؛ لا يزال خلية ~8 كم.",
+                )
+            elif not gabes:
+                context(
+                    "model_current_context",
+                    "تيار بحري نموذجي",
+                    f"{hour.ocean_current_velocity_kmh:.2f} كم/س",
+                    "خارج قابس هذا ضجيج خلية خشنة لا تيار كسرة؛ بلا وزن مصيد.",
                 )
 
         if field_feasibility.holding_difficulty == PotentialLevel.HIGH:
             add(
                 "line_holding_high",
-                "صعوبة عالية محتملة في تثبيت الخط",
-                -10,
+                "جرّ الرصاص مرتفع — الصيد متعذر عملياً",
+                -18,
                 f"قابلية الميدان {field_feasibility.score}/100",
-                "تجميع الموج الجانبي والتيار والريح يرفع مؤشر الجر؛ لا يثبت جرّ الرصاص في العتاد الفعلي.",
+                "موج جانبي/تيار/مدار قاعي يجعل الرصاص يخرج من المرمى.",
                 rule_nature=RuleNature.OPERATIONAL_PROXY,
             )
         elif field_feasibility.holding_difficulty == PotentialLevel.MODERATE:
@@ -2374,6 +2463,25 @@ class DecisionEngine:
                 -4,
                 f"قابلية الميدان {field_feasibility.score}/100",
                 "توجد مؤشرات جرّ متوسطة؛ رمية اختبارية أقصر من خطة الحصة ضرورية.",
+                rule_nature=RuleNature.OPERATIONAL_PROXY,
+            )
+
+        if field_feasibility.turbidity_potential == PotentialLevel.HIGH:
+            add(
+                "turbidity_high",
+                "عكارة مرتفعة تفسد الخرجة",
+                -14,
+                f"قابلية الميدان {field_feasibility.score}/100",
+                "قرائن موج/مطر/نقل تشير إلى ماء موحل يصعب فيه الرؤية والضرب؛ ليست NTU ميدانية.",
+                rule_nature=RuleNature.OPERATIONAL_PROXY,
+            )
+        elif field_feasibility.turbidity_potential == PotentialLevel.MODERATE:
+            add(
+                "turbidity_moderate",
+                "عكارة محتملة",
+                -5,
+                f"قابلية الميدان {field_feasibility.score}/100",
+                "تنبيه عكارة غير مؤكد ميدانياً.",
                 rule_nature=RuleNature.OPERATIONAL_PROXY,
             )
 
@@ -2618,11 +2726,25 @@ class DecisionEngine:
     def _recommended_windows(
         self, hourly: list[HourDecision], session_hours: int
     ) -> list[DecisionWindow]:
-        candidates: list[DecisionWindow] = []
-        for start_index in range(0, len(hourly) - session_hours + 1):
-            group = hourly[start_index : start_index + session_hours]
-            if not _is_consecutive(group):
+        del session_hours
+        runs: list[list[HourDecision]] = []
+        current: list[HourDecision] = []
+        for item in hourly:
+            if _hour_has_calculated_blocker(item):
+                if len(current) >= MIN_OPEN_WINDOW_HOURS and _is_consecutive(current):
+                    runs.append(current)
+                current = []
                 continue
+            if current and item.time - current[-1].time > timedelta(hours=1, minutes=5):
+                if len(current) >= MIN_OPEN_WINDOW_HOURS:
+                    runs.append(current)
+                current = []
+            current.append(item)
+        if len(current) >= MIN_OPEN_WINDOW_HOURS and _is_consecutive(current):
+            runs.append(current)
+
+        candidates: list[DecisionWindow] = []
+        for group in runs:
             safety = _worst_safety(item.safety for item in group)
             if safety in {DecisionLevel.NO_GO, DecisionLevel.UNKNOWN}:
                 continue
@@ -2637,15 +2759,9 @@ class DecisionEngine:
             key_factors = _window_key_factors(group)
             time_range = _time_range_ar(start, end)
             headline = (
-                f"نافذة ببيانات تنفيذ ناقصة من {time_range}"
-                if field_feasibility == FieldFeasibilityLevel.UNKNOWN
-                else f"نافذة صعبة ميدانياً من {time_range}"
-                if field_feasibility == FieldFeasibilityLevel.DIFFICULT
-                else f"نافذة قابلة بشرط ضبط العتاد من {time_range}"
-                if field_feasibility == FieldFeasibilityLevel.WORKABLE
-                else f"نافذة مناسبة من {time_range}"
+                f"ساعات بلا موانع محسوبة من {time_range}"
                 if safety == DecisionLevel.GO
-                else f"نافذة ممكنة بحذر من {time_range}"
+                else f"ساعات بلا منع مع حذر من {time_range}"
             )
             candidates.append(
                 DecisionWindow(
@@ -2668,26 +2784,19 @@ class DecisionEngine:
                 item.field_score,
                 item.opportunity_score,
                 item.confidence_score,
+                -item.start.timestamp(),
             ),
             reverse=True,
         )
-        selected: list[DecisionWindow] = []
-        for candidate in candidates:
-            if all(
-                candidate.end <= existing.start or candidate.start >= existing.end
-                for existing in selected
-            ):
-                selected.append(candidate)
-            if len(selected) == 3:
-                break
-        return selected
+        return candidates[:3]
 
     def _avoid_windows(self, hourly: list[HourDecision]) -> list[DecisionWindow]:
         bad = {DecisionLevel.NO_GO, DecisionLevel.UNKNOWN}
         groups: list[list[HourDecision]] = []
         current: list[HourDecision] = []
         for item in hourly:
-            if item.safety in bad:
+            blocked = item.safety in bad or _hour_has_calculated_blocker(item)
+            if blocked:
                 if current and item.time - current[-1].time > timedelta(hours=1, minutes=5):
                     groups.append(current)
                     current = []
@@ -2752,6 +2861,12 @@ class DecisionEngine:
                 ):
                     return DecisionLevel.NO_GO, DecisionReasonCode.STALE_FORECAST_DATA
                 return DecisionLevel.NO_GO, DecisionReasonCode.CRITICAL_DATA_MISSING
+            if any(
+                item.field_feasibility.holding_difficulty == PotentialLevel.HIGH
+                or item.field_feasibility.turbidity_potential == PotentialLevel.HIGH
+                for item in hourly
+            ):
+                return DecisionLevel.NO_GO, DecisionReasonCode.FIELD_INFEASIBLE
             if any(item.safety == DecisionLevel.NO_GO for item in hourly):
                 return DecisionLevel.NO_GO, DecisionReasonCode.SAFETY_HAZARD
             return DecisionLevel.NO_GO, DecisionReasonCode.CONSERVATIVE_UNCERTAINTY
@@ -2772,6 +2887,14 @@ class DecisionEngine:
         # lower the field score and require a check, but they cannot veto a safe window.
         if field_feasibility.holding_difficulty == PotentialLevel.HIGH:
             return DecisionLevel.NO_GO, DecisionReasonCode.FIELD_INFEASIBLE
+        if field_feasibility.turbidity_potential == PotentialLevel.HIGH:
+            return DecisionLevel.NO_GO, DecisionReasonCode.FIELD_INFEASIBLE
+        if field_feasibility.status == FieldFeasibilityLevel.DIFFICULT and (
+            field_feasibility.rip_current_potential == PotentialLevel.HIGH
+            or field_feasibility.holding_difficulty == PotentialLevel.HIGH
+            or field_feasibility.turbidity_potential == PotentialLevel.HIGH
+        ):
+            return DecisionLevel.NO_GO, DecisionReasonCode.FIELD_INFEASIBLE
         if confidence.score < 50:
             return DecisionLevel.NO_GO, DecisionReasonCode.CONSERVATIVE_UNCERTAINTY
         return DecisionLevel.GO, DecisionReasonCode.SAFE_WINDOW
@@ -2791,7 +2914,7 @@ class DecisionEngine:
         fouling = _worst_potential(item.fouling_transport_potential for item in results)
         turbidity = _worst_potential(item.turbidity_potential for item in results)
         rip = _worst_potential(item.rip_current_potential for item in results)
-        scope = "أفضل نافذة" if recommended else "الساعات المتاحة"
+        scope = "ساعات بلا موانع" if recommended else "الساعات المتاحة"
         reasons = [
             f"اعتمد التجميع أضعف ساعة داخل {scope} كإجراء محافظ.",
             f"صعوبة تثبيت الخط: {_potential_label_ar(holding)}.",
@@ -2896,7 +3019,9 @@ class DecisionEngine:
                 notes.append(
                     f"إشارة CHL-a بعمر {age_hours:.0f} ساعة تجاوزت حد الحداثة {_CHL_FORCE_MAJEURE_MAX_AGE_HOURS:.0f} ساعة؛ لا تدخل سلم المنع."
                 )
-            elif chl is not None and chl >= _CHL_BLOOM_DENSE_MG_M3:
+            elif chl is not None and chl >= _chl_bloom_thresholds(
+                dataset.location.latitude, dataset.location.longitude
+            )[1]:
                 if fouling == PotentialLevel.HIGH:
                     level = max(level, 4)
                     satellite_proxy_force_majeure = True
@@ -2908,7 +3033,9 @@ class DecisionEngine:
                     basis.append(
                         f"إشارة CHL-a مرتفعة حديثة ({chl:.1f} mg/m³) لكن بروكسي النقل غير مرتفع؛ يلزم تحقق ميداني."
                     )
-            elif chl is not None and chl >= _CHL_BLOOM_MODERATE_MG_M3:
+            elif chl is not None and chl >= _chl_bloom_thresholds(
+                dataset.location.latitude, dataset.location.longitude
+            )[0]:
                 level = max(level, 3)
                 basis.append(
                     f"إشارة CHL-a حديثة متوسطة ({chl:.1f} mg/m³)؛ تنبيه غير مؤكد لا دليل قاهر."
@@ -3020,7 +3147,8 @@ class DecisionEngine:
             chl is not None
             and satellite_age_hours is not None
             and satellite_age_hours <= _CHL_FORCE_MAJEURE_MAX_AGE_HOURS
-            and chl >= _CHL_BLOOM_MODERATE_MG_M3
+            and chl
+            >= _chl_bloom_thresholds(dataset.location.latitude, dataset.location.longitude)[0]
         )
         fresh_fouling_report = any(
             report.kind == "fouling" and _field_report_freshness(report.reported_at, dataset)[0]
@@ -3194,7 +3322,10 @@ class DecisionEngine:
         mhw_evidence: list[str] = []
         if model_sst is not None:
             mhw_basis = "satellite" if sat_sst is not None else "forecast_proxy"
-            climatology = _COASTAL_SST_CLIMATOLOGY_C[dataset.target_date.month - 1]
+            zone_key = tunisian_zone(dataset.location.latitude, dataset.location.longitude)
+            climatology = _SST_CLIMATOLOGY_BY_ZONE.get(zone_key, _COASTAL_SST_CLIMATOLOGY_C)[
+                dataset.target_date.month - 1
+            ]
             anomaly = model_sst - climatology
             if anomaly >= _MHW_STRONG_ANOMALY_C:
                 mhw_level = "high"
@@ -3500,21 +3631,21 @@ class DecisionEngine:
         elif twilight_lead:
             feeding_status = "favorable"
             feeding_evidence = [
-                f"النافذة الأفضل تلامس الغسق (بونص أولي {profile.twilight_bonus} للغسق).",
+                f"الساعات المفتوحة تلامس الشفق (تعديل نشاط أولي {profile.twilight_bonus} — لا يغيّر اذهب/لا تذهب).",
                 f"الشروق {_hm(dataset.sunrise)} · الغروب {_hm(dataset.sunset)} — بلا قاعدة قمرية أو Solunar.",
             ]
             feeding_conf = 20
         elif night_lead and profile.night_bonus:
             feeding_status = "favorable"
             feeding_evidence = [
-                f"النافذة الأفضل ليلية (بونص ليلي أولي {profile.night_bonus}).",
+                f"الساعات المفتوحة ليلية (تعديل نشاط أولي {profile.night_bonus} — لا يغيّر القرار).",
                 f"الشروق {_hm(dataset.sunrise)} · الغروب {_hm(dataset.sunset)} — بلا قاعدة قمرية أو Solunar.",
             ]
             feeding_conf = 20
         else:
             feeding_status = "neutral"
             feeding_evidence = [
-                f"النافذة الأفضل خارج الغسق والليل (بونص الغسق الأولي {profile.twilight_bonus}).",
+                f"الساعات المفتوحة خارج الشفق والليل (تعديل نشاط أولي {profile.twilight_bonus} — لا يغيّر القرار).",
                 f"الشروق {_hm(dataset.sunrise)} · الغروب {_hm(dataset.sunset)} — بلا قاعدة قمرية أو Solunar.",
             ]
             feeding_conf = 20
@@ -3546,7 +3677,7 @@ class DecisionEngine:
             (axis.confidence for axis in axes if axis.status != "unknown"), default=5
         )
         notes = [
-            "محور الأنواع تقريري ولا يغيّر القرار الثنائي؛ ضعف فرصة السمك لا يمنع نافذة آمنة قابلة للتنفيذ.",
+            "محور الأنواع تقريري ولا يغيّر اذهب/لا تذهب؛ ضعف الترتيب لا يمنع ساعات بلا موانع.",
             "لا احتمال مصيد، ولا أحجام قانونية، ولا فترات منع موسمية (D10).",
             "الأوزان أوزان أولية غير معايرة محلياً؛ تحتاج سجل مصيد تونسي يشمل الحصص الصفرية.",
             "بُعد حالة البحر (هادئ/معتدل/هائج مع الرغوة) تقريري من أنماط متوسطية منشورة، والرغوة تقدير نموذجي لا رصد؛ لا يدخل ترتيب الأنواع ولا القرار.",
@@ -3754,13 +3885,13 @@ class DecisionEngine:
             TargetSpecies.GENERAL
         ]
         illumination = moon_illumination(dataset.target_date)
-        tide_delta = _tide_channel_delta(spring_neap.classification)
-        lunar_day_delta = _lunar_day_delta(illumination)
+        gabes = in_gabes_zone(dataset.location.latitude, dataset.location.longitude)
         activities: list[SpeciesActivity] = []
         for species_key in ordered_keys:
             profile = SPECIES_PROFILES[species_key]
             entries: list[tuple[HourActivity, list[tuple[str, int]]]] = []
             for hour in hourly:
+                tide_delta = _gabes_tide_hour_delta(hour.derived.tide_state, gabes=gabes)
                 score, contributions = _species_hour_activity(
                     profile,
                     hour,
@@ -3771,7 +3902,8 @@ class DecisionEngine:
                     shore_type=shore_type,
                     moon_illumination=illumination,
                     tide_delta=tide_delta,
-                    lunar_day_delta=lunar_day_delta,
+                    lunar_day_delta=0,
+                    target_species=species_key,
                 )
                 activity = HourActivity(
                     time=hour.time,
@@ -3780,12 +3912,10 @@ class DecisionEngine:
                     is_night=hour.derived.is_night,
                 )
                 entries.append((activity, contributions))
-            lunar_state = "قرب البدر أو المحاق" if lunar_day_delta else "خارج نافذة البدر/المحاق"
             basis = [
                 *_activity_basis_ar(profile),
-                f"المد اليوم من سلسلة مستوى البحر: {spring_neap.folk_label_ar} — أثر الاقتراب من الشاطئ {tide_delta:+d} (قوي +3 / ضعيف -3 / وسط 0).",
-                f"اليوم القمري: {lunar_state} — قرينة شعبية غير معايرة {lunar_day_delta:+d}.",
-                f"إضاءة القمر المحسوبة فلكياً لهذا اليوم: {illumination:.0%} — تُستعمل ليلاً فقط كقرينة ضوء (عتبة 70%).",
+                f"المد: {spring_neap.folk_label_ar} — خارج قابس بلا وزن؛ في قابس المد الصاعد +3 والجزر −3 ساعياً.",
+                f"إضاءة القمر {illumination:.0%} — تُحتسب ليلاً للقاروص فقط (+2)، لا قاعدة سولونار.",
             ]
             activities.append(
                 SpeciesActivity(
@@ -4084,10 +4214,10 @@ class DecisionEngine:
             covered = [item for item in hourly if window.start <= item.time < window.end]
             score = min(item.confidence.score for item in covered)
             reasons = _unique(reason for item in covered for reason in item.confidence.reasons_ar)
-            reasons.insert(0, "القيمة هي أضعف ثقة ساعية داخل أفضل نافذة، كإجراء محافظ.")
+            reasons.insert(0, "القيمة هي أضعف ثقة ساعية داخل ساعات بلا موانع، كإجراء محافظ.")
             weakest = min(covered, key=lambda item: item.confidence.score)
             breakdown = list(weakest.confidence.breakdown_ar)
-            breakdown.append("المكونات تعكس أضعف ساعة داخل أفضل نافذة.")
+            breakdown.append("المكونات تعكس أضعف ساعة داخل ساعات بلا موانع.")
         else:
             score = min(item.confidence.score for item in hourly)
             reasons = _unique(reason for item in hourly for reason in item.confidence.reasons_ar)
@@ -4456,7 +4586,7 @@ class DecisionEngine:
         if decision == DecisionLevel.GO and recommended:
             best = recommended[0]
             opportunity_note = (
-                " فرصة الصيد ضعيفة نسبياً لكنها لا تلغي نافذة اجتازت الحدود الآلية المتاحة."
+                " فرصة الصيد ضعيفة نسبياً داخل الساعات المفتوحة ولا تغيّر قرار اذهب."
                 if opportunity < 45
                 else ""
             )
@@ -4479,15 +4609,14 @@ class DecisionEngine:
                 else ""
             )
             return (
-                f"التوصية: {'اذهب بحذر' if best.safety == DecisionLevel.CAUTION else 'اذهب'} فقط في النافذة من {_time_range_ar(best.start, best.end)}؛ "
-                "هذا اجتياز لحدود المحرك وليس شهادة سلامة ميدانية. "
-                f"مؤشر الفرصة النسبي {opportunity}/100، مؤشر التنفيذ النموذجي {field_feasibility.score}/100، ودعم بيانات التوقع {confidence}/100 (ليس احتمالاً للدقة أو السلامة)."
-                f"{opportunity_note}{proxy_note} تحقق ميدانياً من الكسرة والتيار الساحبي والصوفة قبل بدء الصيد."
+                f"التوصية: اذهب في الساعات بلا موانع محسوبة من {_time_range_ar(best.start, best.end)} فقط. "
+                "الساعات الممنوعة لا تُفتح بقصة سمك. هذا اجتياز لحدود المحرك وليس شهادة سلامة ميدانية. "
+                f"دعم البيانات {confidence}/100.{opportunity_note}{proxy_note}"
             )
 
         reason_labels = {
             DecisionReasonCode.SAFETY_HAZARD: "خطر سلامة أو تجاوز محافظ داخل النافذة",
-            DecisionReasonCode.FIELD_INFEASIBLE: "صعوبة مرتفعة متوقعة في تثبيت الخط داخل أفضل نافذة",
+            DecisionReasonCode.FIELD_INFEASIBLE: "جرّ أو عكارة مرتفعان: لا ساعات كافية بلا مانع تنفيذ",
             DecisionReasonCode.CRITICAL_DATA_MISSING: "نقص بيانات حرجة للسلامة أو قابلية التنفيذ",
             DecisionReasonCode.CONSERVATIVE_UNCERTAINTY: "لا توجد نافذة اجتازت بوابة السلامة، أو أن اكتمال البيانات/الثقة لا يكفي لقرار إيجابي",
             DecisionReasonCode.SAFE_WINDOW: "نافذة اجتازت الحدود الآلية وقابلة للتنفيذ مبدئياً",
@@ -4505,7 +4634,7 @@ class DecisionEngine:
             detail += ": " + "، ".join(causes[:3])
         return (
             f"التوصية: لا تذهب. السبب الرئيسي: {detail}. "
-            "لا تسمح درجة فرصة الصيد بتجاوز بوابة السلامة أو نقص البيانات الحرجة أو قابلية التنفيذ."
+            "لا تُفتح ساعات ممنوعة بترتيب السمك أو بقصة ذهبية."
         )
 
 
@@ -5183,6 +5312,16 @@ def _combine_holding_breakdowns(
         confidence=min(item.confidence for item in present),
         orbital_velocity_band_ms=representative.orbital_velocity_band_ms,
         reasons_ar=reasons,
+    )
+
+
+def _hour_has_calculated_blocker(item: HourDecision) -> bool:
+    if item.safety in {DecisionLevel.NO_GO, DecisionLevel.UNKNOWN}:
+        return True
+    field = item.field_feasibility
+    return (
+        field.holding_difficulty == PotentialLevel.HIGH
+        or field.turbidity_potential == PotentialLevel.HIGH
     )
 
 

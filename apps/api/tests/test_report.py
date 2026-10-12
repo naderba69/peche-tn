@@ -46,6 +46,8 @@ def test_report_periods_cover_four_blocks(dataset_factory) -> None:
     for period in response.fisherman_report.periods:
         assert 0 <= period.comfort_index <= 100
         assert period.wind_cast_effect_m >= 0
+        assert period.gate_ar
+        assert period.activity_ar
 
 
 def test_cast_distance_and_wind_effect_are_documented_estimates(dataset_factory) -> None:
@@ -77,4 +79,23 @@ def test_astronomical_times_are_reference_only(dataset_factory) -> None:
     report = response.fisherman_report
     kinds = {item.kind for item in report.astronomical_times}
     assert kinds  # upper/lower transit + tide events present
-    assert "مرجعي" in report.astronomy_note_ar or "مرجعية" in report.astronomy_note_ar
+    assert "لا يدخل" in report.astronomy_note_ar or "فلك" in report.astronomy_note_ar
+
+
+def test_fish_forecast_is_relative_and_listed(dataset_factory) -> None:
+    engine = DecisionEngine()
+    dataset = dataset_factory()
+    report = engine.evaluate(dataset).fisherman_report
+    assert report is not None
+    assert report.fish_forecasts
+    assert "احتمال" not in report.fish_forecast_note_ar or "ليس احتمال" in report.fish_forecast_note_ar
+    assert "ممنوعة" in report.fish_forecast_note_ar
+    labels = {row.label_ar for row in report.fish_forecasts}
+    assert {"القاروص", "الوراطة", "السار", "المرمار"} <= labels
+    for row in report.fish_forecasts:
+        if row.score is not None:
+            assert 0 <= row.score <= 100
+            assert row.mode_ar
+    open_periods = [p for p in report.periods if p.gate_ar != "ممنوعة" and p.species_forecasts]
+    if open_periods:
+        assert {row.label_ar for row in open_periods[0].species_forecasts} >= {"القاروص", "الوراطة"}

@@ -809,6 +809,19 @@ def classify_spring_neap(
 # ─── Tunisian coastal zone classification (docs/SOURCES-AUDIT.md §1) ───
 # Approximate linear thresholds along the coast: accurate enough to place a
 # spot in its region, not a physical boundary of the gulfs.
+def tunisian_regime(latitude: float, longitude: float) -> str:
+    """Coarse A/B/C seas used by the same engine — not a second model.
+
+    north: swell/mistral coast. east: short fetch and seagrass. gabes: tide + green water.
+    """
+    zone = tunisian_zone(latitude, longitude)
+    if zone in {"northwest", "bizerte_tunis"}:
+        return "north"
+    if zone in {"cap_bon_hammamet", "sahel"}:
+        return "east"
+    return "gabes"
+
+
 def tunisian_zone(latitude: float, longitude: float) -> str:
     # The northwest (سراط) coast climbs past 37°N (Cap Serrat ~37.2°N, 9.0°E),
     # so longitude must be tested before the bizerte_tunis latitude band.

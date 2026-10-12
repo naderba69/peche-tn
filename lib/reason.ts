@@ -48,7 +48,7 @@ export function buildPrimaryReason(result: DecisionResponse): string {
           ? "دعم بيانات هذه النافذة متوسط."
           : "درجة دعم البيانات لا تعني دقة ميدانية أو احتمال سلامة.";
       return [
-        `قرار «اذهب» للنافذة ${formatWindowRange(lead.start, lead.end)} لأن القواعد لم ترصد مانعاً حاسماً للسلامة أو التنفيذ ضمن البيانات المتاحة؛ هذا اجتياز آلي لا إثبات لراحة المكان.`,
+        `قرار «اذهب» لساعات ${formatWindowRange(lead.start, lead.end)} لأنه لا مانع محسوب فيها. خارجها لا تخرج. هذا اجتياز آلي لا إثبات لراحة المكان.`,
         conditions.length ? `توقع النافذة: ${conditions.join(" · ")}.` : "",
         caveats.length ? `تحفظات داخل النافذة: ${caveats.join(" · ")}.` : "",
         confidenceNote,
@@ -56,9 +56,9 @@ export function buildPrimaryReason(result: DecisionResponse): string {
       ].filter(Boolean).join(" ");
     }
     case "safety_hazard":
-      return "خطر سلامة أو عتبة حذر محافظة داخل أفضل نافذة متاحة.";
+      return "خطر سلامة في الساعات المتاحة؛ لا توجد ساعات كافية بلا مانع محسوب.";
     case "field_infeasible":
-      return "صعوبة تثبيت الخط مرتفعة داخل أفضل نافذة؛ مؤشرا النقل والعكارة لا يمثلان رصداً ميدانياً.";
+      return "جرّ الرصاص أو العكارة مرتفعان في الساعات المتاحة؛ لا توجد ساعات كافية بلا مانع تنفيذ.";
     case "critical_data_missing":
       if (result.spot_profile?.shore_type == null) {
         return [
@@ -68,7 +68,7 @@ export function buildPrimaryReason(result: DecisionResponse): string {
       }
       return "بيانات حرجة أخرى ناقصة؛ لا يحوّل المحرك Unknown إلى بحر هادئ.";
     case "conservative_uncertainty":
-      return "لا توجد نافذة اجتازت بوابة السلامة، أو أن اكتمال البيانات/الثقة لا يكفي لقرار إيجابي.";
+      return "لا توجد ساعتان متتاليتان بلا مانع محسوب، أو أن اكتمال البيانات لا يكفي.";
     case "fouling_confirmed":
       return "رمز قديم غير مستخدم؛ البلاغات الميدانية ورمية الاختبار لا تدخل في القرار الحالي.";
     case "fouling_proxy_risk":
@@ -159,7 +159,7 @@ export function buildFishermanNarrative(
   // 1) الحكم
   if (result.decision === "go" && lead) {
     paragraphs.push(
-      `نزيدو ضمن نافذة ${formatWindowRange(lead.start, lead.end)} — الريح والموج داخل حدود السلامة، والتنفيذ الميداني ${fieldFeasibilityLabels[result.field_feasibility.status]}. هذا تحليل من النموذج، موش شهادة ميدانية: العين على البحر قبل العتاد.`,
+      `نزيدو في الساعات بلا موانع ${formatWindowRange(lead.start, lead.end)} فقط. خارجها لا تخرج. التنفيذ ${fieldFeasibilityLabels[result.field_feasibility.status]}. العين على البحر قبل العتاد.`,
     );
   } else {
     paragraphs.push(`الحكم: ${result.summary_ar || result.decision_label_ar} النموذج المحافظ ما يشجعش على الخروج اليوم ضمن الإعدادات الحالية.`);
@@ -214,6 +214,11 @@ export function buildFishermanNarrative(
     if (parts.length) paragraphs.push(`${parts.join(" · ")}.`);
   }
 
+  if (result.decision !== "go") {
+    paragraphs.push("الخلاصة: لا تذهب. لا عتاد ولا نوع سمك يفتح ساعات فيها مانع محسوب.");
+    return paragraphs;
+  }
+
   // 5) السمك والوقت (مؤشر نسبي صادق)
   const species = result.species_axes?.species_matches;
   const top = species
@@ -222,10 +227,10 @@ export function buildFishermanNarrative(
   const hasTwilight = hours.some((hour) => hour.derived.is_twilight);
   if (top) {
     paragraphs.push(
-      `من الأنواع: ${top.label_ar} (توفر ${speciesAvailabilityLabel(top.availability)})${hasTwilight ? "، وفي النافذة شفق معروف عند الصيادين" : ""}. مؤشر نسبي للمقارنة، موش ضمان مصيد.`,
+      `من الأنواع (ترتيب لا قرار): ${top.label_ar} (توفر ${speciesAvailabilityLabel(top.availability)})${hasTwilight ? "؛ الساعات المفتوحة تلامس الشفق" : ""}. ليس ضمان مصيد.`,
     );
   } else if (hasTwilight) {
-    paragraphs.push("النافذة تلامس الشفق — وقت تغذية معروف عند الصيادين، قرينة موش قاعدة مضمونة.");
+    paragraphs.push("الساعات المفتوحة تلامس الشفق — قرينة ضوء فقط، لا تفتح ساعة ممنوعة.");
   } else {
     const target = targetNames[request.angler.target_species] ?? request.angler.target_species;
     paragraphs.push(`الهدف مضبوط على ${target} — من غير سجل مصيد محلي، المؤشر ترتيب نسبي موش وعد صيد.`);
@@ -249,9 +254,9 @@ export function buildFishermanNarrative(
 
   // 7) الخلاصة
   if (result.decision === "go") {
-    paragraphs.push("الخلاصة: النموذج يقترح، والعين تحكم. التزم بالنافذة ولا تمدّدها إذا تغيّر البحر على الأرض.");
+    paragraphs.push("الخلاصة: اخرج فقط في الساعات بلا موانع. إن تغيّر البحر على الأرض، أعد المعاينة.");
   } else {
-    paragraphs.push("الخلاصة: الساعة اللي ما تجي على مزاج البحر، ما تجي على مزاج الصياد. تأجّل أحسن من مجازفة.");
+    paragraphs.push("الخلاصة: لا تذهب. لا عتاد ولا نوع سمك يفتح ساعات فيها مانع محسوب.");
   }
 
   return paragraphs;

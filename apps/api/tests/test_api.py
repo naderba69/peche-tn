@@ -47,7 +47,7 @@ def test_health_and_methodology() -> None:
         assert health.status_code == 200
         assert health.json()["status"] == "ok"
         assert health.json()["version"] == "1.16.0"
-        assert health.json()["engine_version"] == "1.10.2"
+        assert health.json()["engine_version"] == "1.11.7"
         assert health.json()["schema_version"] == "3.20"
         assert health.json()["upstream_cache"]["scope"] == "process_memory"
         assert health.json()["satellite_cache"]["scope"] == "process_memory"

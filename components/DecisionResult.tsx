@@ -43,6 +43,9 @@ import { GearPanel } from "@/components/GearPanel";
 import { GeminiReport } from "@/components/GeminiReport";
 import { FishermanReportView } from "@/components/FishermanReport";
 import { ResultTabs } from "@/components/ResultTabs";
+import { MiniReport } from "@/components/MiniReport";
+import { SpeciesActivityBoard } from "@/components/SpeciesActivityBoard";
+import { TripBlockers } from "@/components/TripBlockers";
 import { buildFishermanNarrative, buildPrimaryReason } from "@/lib/reason";
 import {
   decisionLabels,
@@ -104,14 +107,14 @@ const observationStatusCopy = {
 
 const decisionCopy: Record<DecisionLevel, { eyebrow: string; title: string; text: string }> = {
   go: {
-    eyebrow: "النافذة اجتازت الحدود الآلية المتاحة",
+    eyebrow: "ساعات بلا موانع محسوبة",
     title: "اذهب",
-    text: "فحوصات المحرك والتنفيذ عدّت؛ هذا ليس شهادة سلامة ميدانية، وضعف فرصة الصيد وحده لا يلغي نافذة قابلة للتنفيذ.",
+    text: "لا يوجد مانع محسوب في الساعات المعروضة. ضعف الترتيب النسبي لا يغيّر اذهب.",
   },
   caution: {
-    eyebrow: "يلزم انتباه",
-    title: "امشِ بحذر",
-    text: "فما عوامل تستحق الحذر. راقب البحر ميدانياً والتزم بالنافذة الأقل خطراً.",
+    eyebrow: "حذر في ساعات — ليس قرار اليوم",
+    title: "حذر",
+    text: "الحذر للساعة فقط. قرار اليوم يبقى اذهب أو لا تذهب حسب الموانع.",
   },
   no_go: {
     eyebrow: "الأولوية للسلامة واليقين التنفيذي",
@@ -159,20 +162,8 @@ function uniqueFactors(hours: HourDecision[], predicate: (factor: Factor) => boo
   return [...factors.values()];
 }
 
-function windowSpeciesLine(result: DecisionResponse, window: { start: string; end: string }): string | null {
-  const species = result.species_activity ?? [];
-  if (!species.length) return null;
-  const rows: { label: string; average: number }[] = [];
-  for (const item of species) {
-    const hours = item.hourly.filter((hour) => hour.time >= window.start && hour.time < window.end);
-    if (!hours.length) continue;
-    const average = Math.round(hours.reduce((sum, hour) => sum + hour.score, 0) / hours.length);
-    rows.push({ label: item.label_ar, average });
-  }
-  if (!rows.length) return null;
-  rows.sort((first, second) => second.average - first.average);
-  const top = rows[0];
-  return `الأنشط في هذه النافذة: ${top.label} (${top.average}/100 مؤشر نسبي غير معاير)`;
+function windowSpeciesForecasts(result: DecisionResponse) {
+  return result.fisherman_report?.fish_forecasts ?? [];
 }
 
 function WindDirectionBadge({ directionDeg }: { directionDeg: number | null }) {
@@ -193,15 +184,26 @@ function HourCard({ hour, selected, onSelect }: { hour: HourDecision; selected: 
     <button
       type="button"
       aria-pressed={selected}
+      id={`hour-${hour.time}`}
       className={`hour-card hour-${hour.safety} ${selected ? "selected" : ""}`}
       onClick={onSelect}
     >
       <div className="hour-card-top">
         <strong>{formatHour(hour.time)}</strong>
-        {hour.derived.is_twilight ? <span className="best-tag"><Sparkles size={12} /> شفق</span> : hour.safety === "no_go" ? <ShieldAlert size={15} /> : null}
+        {hour.safety === "no_go" || hour.safety === "unknown" ? (
+          <ShieldAlert size={15} />
+        ) : hour.derived.is_twilight ? (
+          <span className="best-tag">شفق</span>
+        ) : null}
       </div>
       <WindDirectionBadge directionDeg={hour.forecast.wind_direction_deg} />
-      <div className="hour-score"><bdi>{hour.opportunity_score}</bdi><small>/100</small></div>
+      <div className="hour-score">
+        {hour.safety === "no_go" || hour.safety === "unknown" ? (
+          <small>لا ترتيب</small>
+        ) : (
+          <><bdi>{hour.opportunity_score}</bdi><small>/100</small></>
+        )}
+      </div>
       <div className="hour-mini-metrics">
         <span><Wind size={14} /><bdi>{numberOrDash(hour.forecast.wind_speed_kmh)} كم/س</bdi></span>
         <span><Waves size={14} /><bdi>{numberOrDash(hour.forecast.wave_height_m, 1)} م</bdi></span>
@@ -259,6 +261,8 @@ export function DecisionResult({ result, request, stale = false }: DecisionResul
   const [shareState, setShareState] = useState<"idle" | "done" | "error">("idle");
   const [realityMismatch, setRealityMismatch] = useState(false);
   const [reportVisible, setReportVisible] = useState(false);
+  const [focusTabId, setFocusTabId] = useState("timing");
+  const [focusNonce, setFocusNonce] = useState(0);
   const selected = useMemo(
     () => result.hourly.find((hour) => hour.time === selectedTime) ?? result.hourly[0],
     [result.hourly, selectedTime],
@@ -331,7 +335,7 @@ export function DecisionResult({ result, request, stale = false }: DecisionResul
       `Peche TN — ${location.name ?? "بقعة مختارة"}`,
       decisionLabels[result.decision],
       result.summary_ar,
-      leadWindow ? `أفضل نافذة: ${formatWindowRange(leadWindow.start, leadWindow.end)}` : "",
+      leadWindow ? `ساعات بلا موانع: ${formatWindowRange(leadWindow.start, leadWindow.end)}` : "",
       `سبب القرار: ${reasonText}`,
       `قرار المحرك: ${decisionShortLabels[safetyAxis]} · ${fieldFeasibilityLabels[field.status]} حسب النموذج · درجة التنفيذ الداخلية ${field.score}/100 · دعم الأدلة ${field.confidence}/100 (سقف 50؛ لا يساوي احتمال السلامة)`,
       `مؤشر الفرصة النسبي: ${result.opportunity_score}/100 · دعم بيانات التوقع: ${result.confidence.score}/100 (اكتمال واتساق وأفق، ليس دقة أو احتمال سلامة)`,
@@ -425,7 +429,7 @@ export function DecisionResult({ result, request, stale = false }: DecisionResul
           {leadWindow ? (
             <div className="lead-window">
               <span className="lead-window-icon"><CalendarClock size={22} /></span>
-              <span><small>أفضل نافذة مقترحة</small><strong><bdi>{formatWindowRange(leadWindow.start, leadWindow.end)}</bdi></strong></span>
+              <span><small>ساعات بلا موانع محسوبة</small><strong><bdi>{formatWindowRange(leadWindow.start, leadWindow.end)}</bdi></strong></span>
               <span className={`window-safety safety-${leadWindow.safety}`}>{decisionShortLabels[leadWindow.safety]}</span>
             </div>
           ) : (
@@ -437,10 +441,24 @@ export function DecisionResult({ result, request, stale = false }: DecisionResul
               <span><strong>نقاط الحذر داخل النافذة:</strong> {cautionFactors.slice(0, 3).map((factor) => factor.explanation_ar).join(" · ")}</span>
             </div>
           )}
+          {result.decision === "go" && result.avoid_windows.length > 0 && (
+            <div className="lead-cautions" role="note">
+              <AlertOctagon size={15} />
+              <span>
+                <strong>لا تخرج في:</strong>{" "}
+                {result.avoid_windows
+                  .slice(0, 3)
+                  .map((window) => formatWindowRange(window.start, window.end))
+                  .join(" · ")}
+              </span>
+            </div>
+          )}
         </div>
 
         <div className="decision-scores" aria-label="ملخص النقاط">
-          <ScoreRing value={result.opportunity_score} label="مؤشر الفرصة النسبي" tone={tone} />
+          {result.decision === "go" ? (
+            <ScoreRing value={result.opportunity_score} label="ترتيب نسبي داخل الساعات المفتوحة" tone={tone} />
+          ) : null}
           <div className="confidence-card">
             <span><Shield size={19} /> دعم بيانات التوقع</span>
             <strong><bdi>{result.confidence.score}/100</bdi></strong>
@@ -449,8 +467,22 @@ export function DecisionResult({ result, request, stale = false }: DecisionResul
             {result.confidence.breakdown_ar[0] && <p className="confidence-cause">{result.confidence.breakdown_ar[0]}</p>}
           </div>
         </div>
-        <div className="not-probability"><Info size={15} /> مؤشر الفرصة النسبي ترتيب مقارن، وليس احتمال مصيد.</div>
+        <div className="not-probability"><Info size={15} /> {result.decision === "go" ? "الترتيب النسبي لا يغيّر اذهب. الساعات الممنوعة تبقى ممنوعة." : "لا تذهب بسبب مانع محسوب. لا ترتيب يفتح اليوم."}</div>
       </header>
+
+      <MiniReport result={result} />
+
+      <TripBlockers
+        result={result}
+        onOpenHour={(time) => {
+          setSelectedTime(time);
+          setFocusTabId("timing");
+          setFocusNonce((value) => value + 1);
+          window.setTimeout(() => {
+            document.getElementById(`hour-${time}`)?.scrollIntoView({ behavior: "smooth", block: "center" });
+          }, 80);
+        }}
+      />
 
       {/* بطاقة ميدانية مكتفية: الرياح والموج والرصاص دون فتح أي قسم. */}
       {fieldCard.length > 0 && (
@@ -508,6 +540,8 @@ export function DecisionResult({ result, request, stale = false }: DecisionResul
 
       <ResultTabs
         ariaLabel="تفاصيل القرار"
+        focusTabId={focusTabId}
+        focusNonce={focusNonce}
         tabs={[
           {
             id: "timing",
@@ -527,15 +561,15 @@ export function DecisionResult({ result, request, stale = false }: DecisionResul
 
               <section className="windows-section" aria-labelledby="windows-title">
                 <div className="result-section-head">
-                  <div><span className="section-icon"><CalendarClock size={18} /></span><span><h3 id="windows-title">نوافذ الحصة</h3><p>فترات متواصلة اجتازت فحص المحرك.</p></span></div>
+                  <div><span className="section-icon"><CalendarClock size={18} /></span><span><h3 id="windows-title">ساعات بلا موانع</h3><p>فترات متواصلة بلا مانع محسوب. خارجها لا تخرج.</p></span></div>
                 </div>
                 {result.recommended_windows.length ? (
                   <div className="windows-grid">
                     {result.recommended_windows.map((window, index) => {
-                      const speciesLine = windowSpeciesLine(result, window);
+                      const speciesRows = windowSpeciesForecasts(result);
                       return (
                         <article className={index === 0 ? "window-card lead" : "window-card"} key={`${window.start}-${window.end}`}>
-                          <div className="window-rank">{index === 0 ? <><Sparkles size={14} /> الأنسب</> : `خيار ${index + 1}`}</div>
+                          <div className="window-rank">{index === 0 ? "بدون موانع" : `فترة ${index + 1}`}</div>
                           <strong><bdi>{formatWindowRange(window.start, window.end)}</bdi></strong>
                           <p>{window.headline_ar}</p>
                           <details className="window-score-details">
@@ -543,16 +577,16 @@ export function DecisionResult({ result, request, stale = false }: DecisionResul
                             <div><span><Anchor size={14} /> مؤشر تنفيذ {window.field_score}/100</span><span><CircleGauge size={14} /> فرصة نسبية {window.opportunity_score}/100</span><span><Shield size={14} /> تغطية بيانات {window.confidence_score}/100</span></div>
                           </details>
                           <div className="window-factors">{window.key_factors_ar.slice(0, 3).map((factor) => <span key={factor}>{factor}</span>)}</div>
-                          {speciesLine && <small className="window-species"><Sparkles size={13} /> {speciesLine}</small>}
+                          {index === 0 && speciesRows.length > 0 ? <SpeciesActivityBoard rows={speciesRows} compact /> : null}
                         </article>
                       );
                     })}
                   </div>
                 ) : (
-                  <div className="empty-result"><ShieldAlert size={25} /><span><strong>لا توجد نافذة موصى بها.</strong> ما لقيناش مدة متواصلة اجتازت حدود المحرك حسب الإعدادات الحالية.</span><a href="#planner">جرّب يوماً أو بقعة أخرى <ChevronLeft size={16} /></a></div>
+                  <div className="empty-result"><ShieldAlert size={25} /><span><strong>لا ساعات بلا موانع.</strong> لا توجد ساعتان متتاليتان بلا مانع محسوب.</span><a href="#planner">جرّب يوماً أو بقعة أخرى <ChevronLeft size={16} /></a></div>
                 )}
                 {result.avoid_windows.length > 0 && (
-                  <details className="avoid-details">
+                  <details className="avoid-details" open={result.decision === "go"}>
                     <summary><span><ShieldAlert size={17} /> فترات لازم تتجنبها ({result.avoid_windows.length})</span><ChevronLeft size={17} /></summary>
                     <div className="avoid-list">{result.avoid_windows.map((window) => <div key={window.start}><AlertOctagon size={16} /><span><strong>{formatWindowRange(window.start, window.end)}</strong>{window.key_factors_ar.join(" · ")}</span></div>)}</div>
                   </details>
@@ -563,7 +597,13 @@ export function DecisionResult({ result, request, stale = false }: DecisionResul
                 <section className="conditions-section" aria-labelledby="conditions-title">
                   <div className="result-section-head">
                     <div><span className="section-icon"><Compass size={18} /></span><span><h3 id="conditions-title">تفاصيل الساعة · {formatHour(selected.time)}</h3><p>قيم API المتوقعة ومشتقاتها — وليست محطة رصد داخل البقعة.</p></span></div>
-                    <span className={`selected-verdict verdict-${selected.safety}`}>{decisionShortLabels[selected.safety]} · فرصة نسبية {selected.opportunity_score}/100 · مؤشر تنفيذ {selected.field_feasibility.score}/100</span>
+                    <span className={`selected-verdict verdict-${selected.safety}`}>
+                      {decisionShortLabels[selected.safety]}
+                      {selected.safety === "no_go" || selected.safety === "unknown"
+                        ? " · لا ترتيب داخل ساعة ممنوعة"
+                        : ` · ترتيب نسبي ${selected.opportunity_score}/100`}
+                      {" · "}تنفيذ {selected.field_feasibility.score}/100
+                    </span>
                   </div>
                   <div className="conditions-grid">
                     <Metric icon={<Wind size={21} />} label="الريح" value={`${numberOrDash(selected.forecast.wind_speed_kmh)} كم/س`} note={`هبات ${numberOrDash(selected.forecast.wind_gust_kmh)} كم/س`} />

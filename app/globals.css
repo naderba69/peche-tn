@@ -1106,7 +1106,7 @@
       height: calc(var(--bottom-nav-h) + env(safe-area-inset-bottom));
       padding: 4px 6px env(safe-area-inset-bottom);
       display: grid;
-      grid-template-columns: repeat(4, minmax(0, 1fr));
+      grid-template-columns: repeat(5, minmax(0, 1fr));
       align-items: stretch;
       border-top: 1px solid var(--line-strong);
       background: rgba(3, 18, 20, .94);
@@ -1292,7 +1292,9 @@
     body { background: #fff !important; color: #102321; }
     .site-header, .hero, .trust-strip, .planner-shell, .analysis-progress, .result-actions, .safety-note, .site-footer, .connection-banner, .stale-banner { display: none !important; }
     .results-shell { width: 100%; margin: 0; }
-    .decision-hero, .observation-panel, .decision-axes-panel, .field-feasibility-panel, .explanation-grid, .timeline-section, .windows-section, .conditions-section, .tide-section, .details-panel, .safety-checklist { break-inside: avoid; box-shadow: none; background: #fff !important; }
+    .decision-hero, .mini-report, .trip-blockers, .observation-panel, .decision-axes-panel, .field-feasibility-panel, .explanation-grid, .timeline-section, .windows-section, .conditions-section, .tide-section, .details-panel, .safety-checklist { break-inside: avoid; box-shadow: none; background: #fff !important; }
+    .trip-blockers { border-color: #ccd8d5; color: #102321; }
+    .trip-blocker { background: #fff !important; }
     .offline-badge, .checklist-footer button, .spot-report { display: none !important; }
     .hour-strip { flex-wrap: wrap; overflow: visible; }.hour-card { min-width: 120px; flex: 1; }
     .tide-chart { min-width: 0; }.chart-range { min-width: 0; }
@@ -2122,6 +2124,25 @@
 .fr-exec-bait { display: grid; gap: 5px; padding-top: 11px; border-top: 1px solid var(--line); }
 .fr-exec-bait > strong { color: var(--amber-soft); font-size: .9rem; line-height: 1.6; }
 
+.fr-forecast-head { margin: 0 0 10px; color: var(--ink); font-size: .9rem; line-height: 1.7; }
+.fr-forecast-list { display: grid; gap: 8px; margin: 0; padding: 0; list-style: none; }
+.fr-forecast-list li { display: grid; gap: 3px; padding: 10px 12px; border-radius: 10px; background: rgba(255,255,255,.03); }
+.fr-forecast-list strong { color: var(--ink); }
+.fr-forecast-list span { color: var(--mint); font-variant-numeric: tabular-nums; }
+.fr-forecast-list small { color: var(--muted); font-size: .72rem; line-height: 1.55; }
+
+.species-board { display: grid; gap: 8px; }
+.species-board-lead { margin: 0; display: flex; gap: 6px; align-items: flex-start; color: var(--muted); font-size: .78rem; line-height: 1.6; }
+.species-board ul { list-style: none; margin: 0; padding: 0; display: grid; gap: 8px; }
+.species-board li { display: grid; gap: 3px; }
+.species-board-row { display: flex; justify-content: space-between; gap: 8px; font-size: .85rem; }
+.species-board-row strong { color: var(--ink); }
+.species-board-row bdi { color: var(--mint); font-variant-numeric: tabular-nums; font-weight: 800; }
+.species-board-bar { height: 6px; border-radius: 99px; background: rgba(255,255,255,.08); overflow: hidden; }
+.species-board-bar span { display: block; height: 100%; background: var(--mint); border-radius: 99px; }
+.species-board small { color: var(--muted); font-size: .68rem; line-height: 1.45; }
+.species-board.compact ul { gap: 6px; }
+
 .fr-block { padding: 14px; border: 1px solid var(--line); border-radius: 14px; background: rgba(3, 15, 17, .24); }
 .fr-timing-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; }
 .fr-timing { display: grid; gap: 3px; padding: 10px; border-radius: 10px; background: rgba(255, 255, 255, .03); }
@@ -2218,6 +2239,37 @@
    الغرض: تقليل التمرير من ~23 شاشة إلى 2-3 للجواب الأساسي.
    ============================================================ */
 
+.trip-blockers { margin: 18px 0 20px; padding: 18px 18px 8px; border: 1px solid var(--line); border-radius: 22px; background: rgba(3, 15, 17, .4); }
+.trip-blockers .result-section-head { margin-bottom: 12px; }
+.trip-blocker-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px; }
+.trip-blocker-group h4 { margin: 0 0 8px; color: var(--mint-bright); font-size: .78rem; letter-spacing: .04em; }
+.trip-blocker-group ul { display: grid; gap: 8px; padding: 0; list-style: none; }
+.trip-blocker { display: grid; grid-template-columns: 28px 1fr; gap: 8px; padding: 10px 11px; border: 1px solid var(--line); border-radius: 14px; background: var(--panel-2); }
+.trip-blocker strong { display: block; font-size: .92rem; }
+.trip-blocker small { color: var(--muted); font-size: .72rem; }
+.trip-blocker p { margin: 4px 0 0; color: var(--ink-soft); font-size: .78rem; line-height: 1.45; }
+.trip-blocker-icon { display: grid; place-items: center; width: 28px; height: 28px; border-radius: 9px; }
+.trip-blocker.tone-block { border-color: color-mix(in srgb, var(--red) 45%, transparent); }
+.trip-blocker.tone-block .trip-blocker-icon { color: var(--red); background: color-mix(in srgb, var(--red) 16%, transparent); }
+.trip-blocker.tone-caution { border-color: color-mix(in srgb, var(--amber) 40%, transparent); }
+.trip-blocker.tone-caution .trip-blocker-icon { color: var(--amber); background: color-mix(in srgb, var(--amber) 14%, transparent); }
+.trip-blocker.tone-clear .trip-blocker-icon { color: var(--mint); background: color-mix(in srgb, var(--mint) 12%, transparent); }
+.trip-blocker.tone-unknown .trip-blocker-icon { color: var(--muted); background: rgba(255,255,255,.04); }
+.trip-blocker-hour {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  margin-top: 7px;
+  padding: 4px 8px;
+  border-radius: 999px;
+  background: rgba(255,255,255,.06);
+  color: var(--mint-bright);
+  font-size: .72rem;
+}
+@media (max-width: 900px) {
+  .trip-blocker-grid { grid-template-columns: 1fr; }
+}
+
 .field-brief {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
@@ -2313,3 +2365,47 @@
 .hour-diagnostics[open] > summary { border-bottom: 1px solid var(--line); }
 .hour-diagnostics[open] > summary > svg:last-child { transform: rotate(-90deg); }
 .hour-diagnostics > .conditions-grid { padding: 14px; }
+
+.encyclopedia-page {
+  width: min(var(--container), calc(100% - var(--gutter) * 2));
+  margin: 0 auto 88px;
+}
+.encyclopedia-hero { padding: 28px 0 8px; }
+.encyclopedia-hero h1 { font-size: clamp(1.6rem, 4vw, 2.4rem); line-height: 1.25; }
+.encyclopedia-hero p { max-width: 46rem; color: var(--ink-soft); }
+.encyclopedia-tags { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 14px; }
+.encyclopedia-tags span, .encyclopedia-section header span {
+  padding: 4px 10px; border-radius: 999px; font-size: .75rem; font-weight: 700;
+}
+.tag-physics { background: color-mix(in srgb, var(--mint) 18%, transparent); color: var(--mint-bright); }
+.tag-field { background: color-mix(in srgb, var(--amber) 18%, transparent); color: var(--amber-soft); }
+.tag-folk { background: rgba(255,255,255,.06); color: var(--muted); }
+.encyclopedia-tunisia {
+  display: grid; grid-template-columns: auto 1fr; gap: 12px; margin: 18px 0;
+  padding: 16px; border: 1px solid var(--line); border-radius: 18px; background: var(--panel);
+}
+.encyclopedia-tunisia ul { margin: 8px 0 0; padding-inline-start: 1.1rem; color: var(--ink-soft); }
+.encyclopedia-toc {
+  display: flex; flex-wrap: wrap; gap: 8px; margin: 8px 0 24px;
+}
+.encyclopedia-toc a {
+  padding: 8px 12px; border: 1px solid var(--line); border-radius: 999px;
+  font-size: .8rem; color: var(--ink-soft);
+}
+.encyclopedia-section {
+  margin: 0 0 28px; padding: 20px; border: 1px solid var(--line); border-radius: 20px; background: var(--panel-2);
+}
+.encyclopedia-section header { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; margin-bottom: 10px; }
+.encyclopedia-section h2 { font-size: 1.15rem; }
+.encyclopedia-section p { color: var(--ink-soft); margin: 0 0 10px; }
+.encyclopedia-caption { color: var(--mint-bright); font-size: .8rem; font-weight: 700; margin: 12px 0 6px; }
+.encyclopedia-table-wrap { overflow-x: auto; margin: 8px 0 14px; }
+.encyclopedia-table-wrap table { width: 100%; border-collapse: collapse; font-size: .82rem; }
+.encyclopedia-table-wrap th, .encyclopedia-table-wrap td {
+  padding: 8px 10px; border-bottom: 1px solid var(--line); text-align: start; vertical-align: top;
+}
+.encyclopedia-table-wrap th { color: var(--muted); font-weight: 700; }
+.encyclopedia-engine {
+  margin-top: 12px; padding: 10px 12px; border-radius: 12px;
+  background: rgba(75, 231, 195, .08); color: var(--ink) !important;
+}

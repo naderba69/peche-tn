@@ -22,15 +22,17 @@ from collections import Counter
 from datetime import datetime
 from typing import TypeVar
 
-from .enums import WindRelation
-from .labels import DECISION_LABEL_AR, WIND_RELATION_AR
-from .math import moon_illumination, moon_transit_times
+from .enums import DecisionLevel, PotentialLevel, WindRelation
+from .fish_activity import FORECAST_NOTE_AR, build_forecasts
+from .labels import DECISION_LABEL_AR, TIDE_STATE_AR, WIND_RELATION_AR
+from .math import in_gabes_zone, moon_illumination, moon_transit_times
 from .models import (
     AstronomicalTime,
     DecisionResponse,
     FishermanReport,
     ForecastDataset,
     ReportPeriod,
+    SpeciesPeriodScore,
 )
 from .species import (
     BAIT_BY_SPECIES,
@@ -53,10 +55,10 @@ _COMPASS_AR = (
 
 # Fixed four-block day partition (presentation only).
 _PERIODS = (
-    ("dawn", "السحر", 0, 4),
-    ("morning", "الصباح", 4, 12),
-    ("midday", "الظهيرة", 12, 18),
-    ("dusk", "الغسق", 18, 24),
+    ("dawn", "آخر الليل", 0, 4),
+    ("morning", "الفجر والصباح", 4, 12),
+    ("midday", "الظهيرة والعشية", 12, 18),
+    ("dusk", "المساء والليل", 18, 24),
 )
 
 # Documented reference table: typical surfcasting release range (4.2 m rod,
@@ -69,7 +71,7 @@ _BASE_CAST_BY_BAND_M = {"light": 55, "medium": 70, "heavy": 85, "extreme": 95}
 _WIND_CAST_PENALTY_M_PER_KMH = 0.15
 
 _DECISION_REASON_AR = {
-    "safe_window": "نافذة آمنة اجتازت فحوص المحرك",
+    "safe_window": "ساعات بلا موانع محسوبة",
     "safety_hazard": "خطر سلامة فوق الحدود المحافظة",
     "field_infeasible": "تعذّر التنفيذ الميداني",
     "critical_data_missing": "نقص بيانات حرجة",
@@ -81,8 +83,7 @@ _DECISION_REASON_AR = {
 }
 
 _ASTRONOMY_NOTE_AR = (
-    "أوقات فلكية مرجعية محسوبة (سلسلة Meeus) أو من مزوّد الأرصاد؛ "
-    "ليست قاعدة صيد ولا تدخل القرار أو السلامة."
+    "فلك فقط: شروق/غروب للشفق. عبور القمر وإضاءته لا يدخلان اذهب/لا تذهب ولا نشاط السمك."
 )
 
 
@@ -94,6 +95,59 @@ def _compass_ar(deg: float | None) -> str:
 
 def _hm(value: datetime | None) -> str | None:
     return None if value is None else value.strftime("%H:%M")
+
+
+def _hour_blocked(item) -> bool:
+    if item.safety in {DecisionLevel.NO_GO, DecisionLevel.UNKNOWN}:
+        return True
+    field = item.field_feasibility
+    return field.holding_difficulty == PotentialLevel.HIGH or field.turbidity_potential == PotentialLevel.HIGH
+
+
+def _open_range_ar(open_hours, tz) -> str | None:
+    if not open_hours:
+        return None
+    start = open_hours[0].time.astimezone(tz)
+    last = open_hours[-1].time.astimezone(tz)
+    end_hour = (last.hour + 1) % 24
+    return f"{start:%H:%M}–{end_hour:02d}:00"
+
+
+def _activity_from_open(open_hours) -> tuple[int | None, str]:
+    if not open_hours:
+        return None, "لا يُعرض نشاط سمك: الفترة ممنوعة بالموانع المحسوبة."
+    score = round(sum(item.opportunity_score for item in open_hours) / len(open_hours))
+    plus: list[str] = []
+    minus: list[str] = []
+    for hour in open_hours:
+        for factor in hour.factors:
+            if not factor.score_delta:
+                continue
+            if factor.score_delta > 0:
+                plus.append(factor.label_ar)
+            else:
+                minus.append(factor.label_ar)
+    bits = [f"ترتيب نسبي {score}/100 من الريح والموج والضوء والماء داخل الساعات المفتوحة."]
+    unique_plus = _unique(plus)[:3]
+    unique_minus = _unique(minus)[:3]
+    if unique_plus:
+        bits.append("يرفعه: " + "، ".join(unique_plus) + ".")
+    if unique_minus:
+        bits.append("يخفضه: " + "، ".join(unique_minus) + ".")
+    bits.append("لا يغيّر اذهب/لا تذهب.")
+    return score, " ".join(bits)
+
+
+def _gabes_tide_ar(dataset: ForecastDataset, open_hours) -> str | None:
+    if not in_gabes_zone(dataset.location.latitude, dataset.location.longitude):
+        return None
+    if not open_hours:
+        return "قابس: المدّ لا يفتح فترة فيها مانع محسوب."
+    states = [item.derived.tide_state for item in open_hours if item.derived.tide_state]
+    if not states:
+        return "قابس: حركة المدّ غير مكتملة في الساعات المفتوحة."
+    labels = _unique([TIDE_STATE_AR.get(state, str(state)) for state in states])
+    return "قابس مدّ في الساعات المفتوحة: " + "، ".join(labels) + " — وزن نشاط فقط."
 
 
 def _mean(values: list[float | None]) -> float | None:
@@ -191,12 +245,16 @@ def _montage_ar(state: str, wind_kmh: float | None) -> str:
     return "مونتاج بسنود طويل (فرع سفلي ~150سم، خفيف) — حركة طبيعية للطعم في الماء الهادئ."
 
 
-def _turbidity_ar(wind_kmh: float | None, fnu: float | None) -> str:
-    if wind_kmh is not None and wind_kmh >= 25.0:
-        return "رياح قوية قد تثير العكارة قرب الكسرة — عاين قبل الرمي."
+def _turbidity_ar(hours, fnu: float | None) -> str:
+    levels = [item.field_feasibility.turbidity_potential for item in hours]
+    if any(level == PotentialLevel.HIGH for level in levels):
+        return "مانع عكارة محسوب (HIGH) — يمنع الساعات؛ ليس قراءة NTU."
+    if any(level == PotentialLevel.MODERATE for level in levels):
+        extra = " سياق ساتلي منفصل." if fnu is not None and fnu >= 2.0 else ""
+        return "مؤشر عكارة متوسط — تنبيه لا مانع." + extra
     if fnu is not None and fnu >= 2.0:
-        return "العينة الساتلية (1كم من الشاطئ) مرتفعة نسبياً — سياق لا قياس."
-    return "لا مؤشر نموذجي قوي على عكارة."
+        return "لا مانع عكارة محسوب. العينة الساتلية مرتفعة نسبياً — سياق لا قياس ولا قرار."
+    return "لا مانع عكارة محسوب في هذه الساعات."
 
 
 def _pressure_trend_ar(hours_pressure_change: list[float | None]) -> str:
@@ -248,7 +306,11 @@ def build_fisherman_report(
     tide_low_ar = [
         event.time.strftime("%H:%M") for event in decision.tide_events if event.kind == "low"
     ]
-    tide_note_ar = "مواقيت مدّ نموذجية من النموذج البحري؛ المدّ والجزر في تونس ضعيف جداً (~0.3م)."
+    tide_note_ar = (
+        "مواقيت مدّ نموذجية. في قابس المدّ حاكم على المسطح؛ خارجها سنتمترات — سياق لا قرار."
+        if in_gabes_zone(dataset.location.latitude, dataset.location.longitude)
+        else "مواقيت مدّ نموذجية. خارج قابس المدى سنتمترات — سياق لا قرار صيد."
+    )
     pressure_hpa = _rounded_mean([item.forecast.pressure_msl_hpa for item in hourly])
     pressure_trend = _pressure_trend_ar([item.derived.pressure_change_12h_hpa for item in hourly])
     day_wind = _mean([item.forecast.wind_speed_kmh for item in hourly])
@@ -263,7 +325,7 @@ def build_fisherman_report(
                 kind="upper_transit",
                 label_ar="العبور القمري العلوي (القمر في أعلى نقطة)",
                 time_ar=upper_transit.strftime("%H:%M"),
-                note_ar="محسوب فلكياً — مرجعي.",
+                note_ar="فلك فقط — لا يدخل الصيد ولا القرار.",
             )
         )
     if lower_transit is not None:
@@ -272,7 +334,7 @@ def build_fisherman_report(
                 kind="lower_transit",
                 label_ar="العبور القمري السفلي",
                 time_ar=lower_transit.strftime("%H:%M"),
-                note_ar="محسوب فلكياً — مرجعي.",
+                note_ar="فلك فقط — لا يدخل الصيد ولا القرار.",
             )
         )
     if moonrise_ar is not None:
@@ -281,7 +343,7 @@ def build_fisherman_report(
                 kind="moonrise",
                 label_ar="طلوع القمر",
                 time_ar=moonrise_ar,
-                note_ar="من مزوّد الأرصاد.",
+                note_ar="فلك فقط — لا يدخل الصيد ولا القرار.",
             )
         )
     if moonset_ar is not None:
@@ -290,7 +352,7 @@ def build_fisherman_report(
                 kind="moonset",
                 label_ar="غروب القمر",
                 time_ar=moonset_ar,
-                note_ar="من مزوّد الأرصاد.",
+                note_ar="فلك فقط — لا يدخل الصيد ولا القرار.",
             )
         )
     for event in decision.tide_events:
@@ -327,47 +389,85 @@ def build_fisherman_report(
                     range_ar=f"{start_hour:02d}:00-{end_hour:02d}:00",
                     state_ar="لا بيانات نموذجية في هذه الفترة.",
                     wind_relation_ar="غير متوفر",
-                    turbidity_ar=_turbidity_ar(None, None),
+                    turbidity_ar="لا بيانات عكارة لهذه الفترة.",
                     montage_ar="—",
+                    gate_ar="لا بيانات",
+                    activity_ar="لا نشاط: لا ساعات في هذه الفترة.",
                 )
             )
             continue
 
-        wind_speed = _mean([item.forecast.wind_speed_kmh for item in block])
-        wind_gust = _mean([item.forecast.wind_gust_kmh for item in block])
-        wind_dir = _circular_mean_deg([item.forecast.wind_direction_deg for item in block])
-        wave_height = _mean([item.forecast.wave_height_m for item in block])
-        wave_period = _mean([item.forecast.wave_period_s for item in block])
-        relation = _most_frequent([item.derived.wind_relation.value for item in block], "unknown")
-        shoreward = _mean([item.derived.wind_shoreward_component_kmh for item in block])
+        open_hours = [item for item in block if not _hour_blocked(item)]
+        stats = open_hours or block
+        wind_speed = _mean([item.forecast.wind_speed_kmh for item in stats])
+        wind_gust = _mean([item.forecast.wind_gust_kmh for item in stats])
+        wind_dir = _circular_mean_deg([item.forecast.wind_direction_deg for item in stats])
+        wave_height = _mean([item.forecast.wave_height_m for item in stats])
+        wave_period = _mean([item.forecast.wave_period_s for item in stats])
+        relation = _most_frequent([item.derived.wind_relation.value for item in stats], "unknown")
+        shoreward = _mean([item.derived.wind_shoreward_component_kmh for item in stats])
         opposing = max(0.0, shoreward or 0.0)
         cast_effect_m = round(opposing * _WIND_CAST_PENALTY_M_PER_KMH)
         cast_distance_m = max(0, base_cast_m - cast_effect_m)
-        mean_confidence = _mean([float(item.confidence.score) for item in block])
+        mean_confidence = _mean([float(item.confidence.score) for item in stats])
         confidence_pct = round(mean_confidence) if mean_confidence is not None else None
         feels_like = _wind_chill_c(
-            _mean([item.forecast.air_temperature_c for item in block]), wind_speed
+            _mean([item.forecast.air_temperature_c for item in stats]), wind_speed
         )
         comfort = _comfort_index(
             feels_like,
             wave_height,
-            _mean([item.forecast.precipitation_probability_pct for item in block]),
+            _mean([item.forecast.precipitation_probability_pct for item in stats]),
         )
         state, _ = classify_sea_state(wave_height, wind_speed)
 
         warnings: list[str] = []
-        if wind_gust is not None and wind_gust >= 35.0:
-            warnings.append(f"هبات قوية (≈{round(wind_gust)} كم/س) تزعج الرمي والثبات.")
-        elif wind_gust is not None and wind_gust >= 25.0:
-            warnings.append(f"هبات ملحوظة (≈{round(wind_gust)} كم/س) — رصاص أثقل عند الحاجة.")
-        if wave_height is not None and wave_height >= 1.1:
-            warnings.append(f"الموج مرتفع (≈{wave_height:.1f} م) — احذر من الانزلاق.")
+        if not open_hours:
+            warnings.append("أرقام الريح/الموج هنا من ساعات المنع — لا جلسة.")
+        elif len(open_hours) < len(block):
+            warnings.append("الأرقام من الساعات بلا موانع فقط؛ خارجها لا تخرج.")
+        if wind_gust is not None and wind_gust >= 50.0:
+            warnings.append(f"هبات فوق حد المنع (≈{round(wind_gust)} كم/س).")
+        elif wind_gust is not None and wind_gust >= 36.0:
+            warnings.append(f"هبات عند حد الحذر (≈{round(wind_gust)} كم/س).")
+        if wave_height is not None and wave_height >= 1.55:
+            warnings.append(f"موج عند/فوق حد الرمل (≈{wave_height:.1f} م Hs).")
+        elif wave_height is not None and wave_height >= 0.9:
+            warnings.append(f"موج عند حد الحذر (≈{wave_height:.1f} م Hs).")
         if any(
             item.forecast.lightning_potential_jkg
             for item in block
             if item.forecast.lightning_potential_jkg
         ):
             warnings.append("مؤشر رعد نموذجي — غادر الشاطئ فور سماع الرعد.")
+
+        if not open_hours:
+            gate_ar = "ممنوعة"
+        elif len(open_hours) == len(block):
+            gate_ar = "بلا موانع"
+        else:
+            gate_ar = "فيها ساعات بلا موانع"
+        activity_score, activity_ar = _activity_from_open(open_hours)
+        montage_ar = "—" if not open_hours else _montage_ar(state, wind_speed)
+        species_top_ar = None
+        period_species: list[SpeciesPeriodScore] = []
+        if open_hours:
+            _, period_ranks = build_forecasts(dataset, open_hours)
+            period_species = [
+                SpeciesPeriodScore(
+                    species=row.species,
+                    label_ar=row.label_ar,
+                    score=row.score,
+                    mode_ar=row.mode_ar,
+                    drivers_ar=row.drivers_ar,
+                )
+                for row in period_ranks
+            ]
+            bits = [
+                f"{row.label_ar} {row.score if row.score is not None else '—'}%"
+                for row in period_ranks
+            ]
+            activity_ar = f"{activity_ar} نشاط الأنواع: " + "، ".join(bits) + "."
 
         periods.append(
             ReportPeriod(
@@ -383,11 +483,18 @@ def build_fisherman_report(
                 wind_cast_effect_m=float(cast_effect_m),
                 wave_height_m=_rounded2(wave_height),
                 wave_period_s=_rounded1(wave_period),
-                cast_distance_m=cast_distance_m,
+                cast_distance_m=None if not open_hours else cast_distance_m,
                 comfort_index=comfort,
-                turbidity_ar=_turbidity_ar(wind_speed, fnu),
-                montage_ar=_montage_ar(state, wind_speed),
+                turbidity_ar=_turbidity_ar(stats, fnu),
+                montage_ar=montage_ar,
                 warnings_ar=warnings,
+                gate_ar=gate_ar,
+                open_range_ar=_open_range_ar(open_hours, tz),
+                activity_ar=activity_ar,
+                gabes_tide_ar=_gabes_tide_ar(dataset, open_hours),
+                activity_score=activity_score,
+                species_top_ar=species_top_ar,
+                species_forecasts=period_species,
             )
         )
 
@@ -410,6 +517,9 @@ def build_fisherman_report(
     safety_advice_ar = _safety_advice(decision, dataset)
 
     # ── 6. Reference numbers ────────────────────────────────────────────── #
+    all_open = [item for item in hourly if not _hour_blocked(item)]
+    fish_headline, fish_forecasts = build_forecasts(dataset, all_open)
+
     water_temp = _mean([item.forecast.sea_surface_temperature_c for item in hourly])
     air_temp = _mean([item.forecast.air_temperature_c for item in hourly])
     max_gust = max(
@@ -421,7 +531,7 @@ def build_fisherman_report(
         decision_label_ar=DECISION_LABEL_AR[decision.decision],
         decision_reason_ar=_DECISION_REASON_AR.get(decision.decision_reason_code.value, "—"),
         opportunity_score=decision.opportunity_score,
-        opportunity_note_ar="مؤشر الفرصة ترتيب نسبي 0-100 للمقارنة؛ ليس نسبة نجاح ولا ضمان مصيد.",
+        opportunity_note_ar="ترتيب نسبي 0-100 من العوامل البحرية داخل الساعات المفتوحة؛ ليس نسبة نجاح ولا يفتح ساعة ممنوعة.",
         target_bait_ar=target_bait_ar,
         bait_note_ar=bait_note_ar,
         beach_direction_deg=seaward,
@@ -441,6 +551,9 @@ def build_fisherman_report(
         beach_summary_ar=_beach_summary_ar(day_state, day_wind, pressure_trend),
         astronomical_times=astronomical_times,
         astronomy_note_ar=_ASTRONOMY_NOTE_AR,
+        fish_forecast_headline_ar=fish_headline,
+        fish_forecasts=fish_forecasts,
+        fish_forecast_note_ar=FORECAST_NOTE_AR,
         periods=periods,
         red_factors_ar=red_factors,
         green_factors_ar=green_factors,
@@ -507,12 +620,8 @@ def _timing_advice(decision: DecisionResponse) -> str:
         best = decision.recommended_windows[0]
         start = best.start.strftime("%H:%M")
         end = best.end.strftime("%H:%M")
-        return f"النافذة الأنسب {start}-{end}؛ التزم بها ولا تمدّدها إذا تغيّر البحر على الأرض."
-    twilight = [item for item in decision.hourly if item.derived.is_twilight]
-    if twilight:
-        first = twilight[0].time.strftime("%H:%M")
-        return f"لا نافذة آمنة اليوم؛ إن خرجت فقرب الشفق ({first}) بعد معاينة ميدانية."
-    return "لا نافذة آمنة اليوم؛ معاينة ميدانية قبل أي قرار بالخروج."
+        return f"ساعات بلا موانع محسوبة {start}-{end}؛ خارجها لا تخرج. إن تغيّر البحر على الأرض أعد المعاينة."
+    return "لا تذهب: لا توجد ساعات كافية بلا مانع محسوب."
 
 
 def _distance_advice(base_cast_m: int, periods: list[ReportPeriod]) -> str:

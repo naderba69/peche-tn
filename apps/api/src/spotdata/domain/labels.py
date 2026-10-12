@@ -2,7 +2,7 @@ from .enums import DecisionLevel, TideState, WaveIncidence, WindRelation
 
 DECISION_LABEL_AR = {
     DecisionLevel.GO: "اذهب",
-    DecisionLevel.CAUTION: "اذهب بحذر",
+    DecisionLevel.CAUTION: "حذر",
     DecisionLevel.NO_GO: "لا تذهب",
     DecisionLevel.UNKNOWN: "المعطيات غير كافية للقرار",
 }

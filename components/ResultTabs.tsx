@@ -1,6 +1,6 @@
 "use client";
 
-import { useId, useRef, useState } from "react";
+import { useEffect, useId, useRef, useState } from "react";
 
 export interface ResultTab {
   id: string;
@@ -17,10 +17,24 @@ export interface ResultTab {
  * يرى الصيّاد القرار فوراً ثم يفتح ما يحتاجه فقط.
  * تتبع نمط ARIA Tabs: أسهم للتنقل، Home/End للطرفين، وتفعيل يدوي.
  */
-export function ResultTabs({ tabs, ariaLabel }: { tabs: ResultTab[]; ariaLabel: string }) {
+export function ResultTabs({
+  tabs,
+  ariaLabel,
+  focusTabId,
+  focusNonce,
+}: {
+  tabs: ResultTab[];
+  ariaLabel: string;
+  focusTabId?: string;
+  focusNonce?: number;
+}) {
   const [active, setActive] = useState(tabs[0]?.id ?? "");
   const baseId = useId();
   const refs = useRef<Record<string, HTMLButtonElement | null>>({});
+
+  useEffect(() => {
+    if (focusTabId) setActive(focusTabId);
+  }, [focusTabId, focusNonce]);
 
   const focusTab = (id: string) => {
     setActive(id);

@@ -2,13 +2,14 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { BarChart3, FileText, MapPinned, ShieldCheck, Waves } from "lucide-react";
+import { BarChart3, BookOpen, FileText, MapPinned, ShieldCheck, Waves } from "lucide-react";
 
 const NAV_ITEMS = [
-  { href: "/", label: "تقرير بقعة", icon: FileText },
-  { href: "/wilayas", label: "أفضل البقع", icon: MapPinned },
-  { href: "/calendar", label: "التقويم", icon: BarChart3 },
-  { href: "/bulletin", label: "نشرة INM", icon: ShieldCheck },
+  { href: "/", label: "القرار", icon: FileText },
+  { href: "/wilayas", label: "البقع", icon: MapPinned },
+  { href: "/calendar", label: "المواسم", icon: BarChart3 },
+  { href: "/encyclopedia", label: "موسوعة", icon: BookOpen },
+  { href: "/bulletin", label: "INM", icon: ShieldCheck },
 ] as const;
 
 export function SiteHeader() {

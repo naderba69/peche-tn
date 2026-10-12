@@ -44,6 +44,14 @@ jobs:
       - run: test -s out/index.html && test -s out/offline.html
       - run: npx playwright install --with-deps chromium
       - run: npm run test:e2e
+      - uses: actions/upload-artifact@v4
+        if: failure()
+        with:
+          name: playwright-report
+          path: |
+            playwright-report/
+            test-results/
+          retention-days: 7
 
   full-stack-container:
     runs-on: ubuntu-24.04

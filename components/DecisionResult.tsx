@@ -841,7 +841,7 @@ export function DecisionResult({ result, request, stale = false }: DecisionResul
           },
           {
             id: "science",
-            label: "العلميات",
+            label: "العمليات",
             icon: <Database size={16} />,
             content: (
               <>

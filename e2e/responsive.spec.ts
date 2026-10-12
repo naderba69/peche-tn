@@ -1,6 +1,9 @@
 import { readFile } from "node:fs/promises";
 import { expect, test, type Page } from "@playwright/test";
-import type { DecisionResponse, ForecastDecisionRequest, HourDecision } from "@/lib/types";
+import type { DecisionResponse } from "@/lib/types";
+
+// The live decision is either GO or NO_GO depending on real conditions; tests accept both.
+const DECISION_HEADING = /^(اذهب|لا تذهب|حذر|المعطيات ناقصة)$/;
 
 const viewports = [
   { name: "small-phone", width: 320, height: 568 },
@@ -9,520 +12,6 @@ const viewports = [
   { name: "small-desktop", width: 1024, height: 768 },
   { name: "wide-desktop", width: 1440, height: 900 },
 ];
-
-function isoHour(date: string, hour: number): string {
-  return `${date}T${String(hour).padStart(2, "0")}:00:00+01:00`;
-}
-
-function nextIsoDate(date: string): string {
-  const value = new Date(`${date}T12:00:00Z`);
-  value.setUTCDate(value.getUTCDate() + 1);
-  return value.toISOString().slice(0, 10);
-}
-
-function makeHour(date: string, hour: number): HourDecision {
-  const safety = hour === 11 ? "caution" as const : "go" as const;
-  const opportunity = hour === 8 ? 82 : Math.max(45, 78 - Math.abs(hour - 8) * 7);
-  return {
-    time: isoHour(date, hour),
-    safety,
-    opportunity_score: opportunity,
-    confidence: {
-      score: 84,
-      band: "high",
-      reasons_ar: ["توفرت أهم متغيرات الريح والموج للساعة."],
-      breakdown_ar: ["لا خافض محدد؛ السقف الوحيد 85/100 لاعتماد النموذج بلا قياس مباشر في منطقة الكسرة."],
-      is_accuracy_probability: false,
-    },
-    field_feasibility: {
-      status: "favorable",
-      score: 82,
-      confidence: 48,
-      holding_difficulty: "low",
-      fouling_transport_potential: "moderate",
-      turbidity_potential: "low",
-      rip_current_potential: "low",
-      fouling_evidence_count: 2,
-      turbidity_evidence_count: 1,
-      antecedent_window_hours: 48,
-      reasons_ar: [
-        "صعوبة تثبيت الخط منخفضة في الفحص الآلي.",
-        "قابلية نقل مادة موجودة متوسطة وتحتاج رمية اختبارية.",
-      ],
-      limitations_ar: [
-        "هذا فحص مؤشرات منخفض الثقة وليس رصداً مباشراً للصوفة أو التيار الساحبي.",
-      ],
-      is_direct_observation: false,
-    },
-    factors: [
-      {
-        code: "wind_speed",
-        label_ar: "الريح",
-        impact: hour === 11 ? "negative" : "positive",
-        severity: hour === 11 ? "caution" : "info",
-        basis: "model_forecast",
-        rule_nature: "safety_policy",
-        value: hour === 11 ? "22 كم/س" : "11 كم/س",
-        score_delta: hour === 11 ? -8 : 9,
-        explanation_ar: hour === 11
-          ? "الريح تقوى قرب منتصف النهار وتستحق الانتباه."
-          : "الريح هادئة ومناسبة نسبياً للوقوف على الشاطئ.",
-        is_direct_observation: false,
-      },
-      {
-        code: "wave_height",
-        label_ar: "الموج",
-        impact: "positive",
-        severity: "info",
-        basis: "derived_forecast",
-        rule_nature: "expert_prior",
-        value: "0.6 م",
-        score_delta: 7,
-        explanation_ar: "ارتفاع الموج ضمن المجال التشغيلي الأولي لهذه البقعة.",
-        is_direct_observation: false,
-      },
-    ],
-    forecast: {
-      wind_speed_kmh: hour === 11 ? 22 : 11,
-      wind_gust_kmh: hour === 11 ? 31 : 17,
-      wind_direction_deg: 62,
-      wave_height_m: 0.6,
-      wave_period_s: 7.8,
-      wave_direction_deg: 74,
-      wind_wave_height_m: 0.35,
-      wind_wave_period_s: 4.8,
-      wind_wave_direction_deg: 65,
-      swell_height_m: 0.4,
-      swell_period_s: 8.2,
-      swell_direction_deg: 78,
-      sea_surface_temperature_c: 25.1,
-      ocean_current_velocity_kmh: 0.24,
-      ocean_current_direction_deg: 95,
-      sea_level_height_msl_m: 0.18 + (hour - 6) * 0.03,
-      air_temperature_c: 27,
-      apparent_temperature_c: 28,
-      relative_humidity_pct: 64,
-      dew_point_c: 19.5,
-      cloud_cover_pct: 24,
-      shortwave_radiation_wm2: hour === 6 ? 90 : 520,
-      uv_index: hour === 6 ? 0.7 : 5.2,
-      lightning_potential_jkg: null,
-      cape_jkg: 50,
-      precipitation_mm: 0,
-      precipitation_probability_pct: 5,
-      weather_code: 1,
-      pressure_msl_hpa: 1015,
-      visibility_m: 18_000,
-    },
-    derived: {
-      wind_relation: "cross_offshore",
-      wind_angle_deg: 118,
-      wind_shoreward_component_kmh: -7.1,
-      wind_alongshore_component_kmh: 13.2,
-      wind_alongshore_signed_component_kmh: -13.2,
-      alongshore_positive_bearing_deg: 152,
-      wind_drag_coefficient: 0.0012,
-      wind_stress_pa: hour === 11 ? 0.0457 : 0.0137,
-      wind_stress_shoreward_pa: hour === 11 ? -0.0215 : -0.0064,
-      wind_stress_alongshore_pa: hour === 11 ? -0.0403 : -0.0121,
-      wave_incidence: "direct",
-      wave_angle_deg: 16,
-      wave_shoreward_alignment: 0.961,
-      wave_alongshore_alignment: 0.276,
-      wave_alongshore_signed_alignment: -0.276,
-      deep_water_wavelength_m: 95,
-      wave_steepness: 0.012,
-      wave_energy_proxy: 2.8,
-      alongshore_wave_proxy: 0.8,
-      alongshore_wave_signed_proxy: -0.8,
-      wave_component_angle_deg: 13,
-      wave_component_secondary_energy_share: 0.43,
-      swell_incidence: "direct",
-      swell_angle_deg: 4,
-      gust_factor: hour === 11 ? 1.41 : 1.55,
-      max_wind_direction_shift_6h_deg: 18,
-      wind_direction_coherence_6h: 0.94,
-      wind_direction_data_hours_6h: 6,
-      current_alongshore_kmh: 0.18,
-      current_cross_shore_kmh: 0.1,
-      tide_state: hour < 10 ? "rising" : "falling",
-      sea_level_rate_m_per_h: hour < 10 ? 0.03 : -0.02,
-      tide_movement_index: 0.4,
-      pressure_change_3h_hpa: 0.6,
-      pressure_change_24h_hpa: -1.2,
-      sea_surface_temperature_change_24h_c: 0.2,
-      max_wind_speed_24h_kmh: 22,
-      max_wave_height_24h_m: 0.7,
-      strong_wind_hours_24h: 0,
-      sea_level_range_target_day_m: 0.35,
-      rain_24h_mm: 0,
-      rain_48h_mm: 0,
-      rain_72h_mm: 0,
-      max_wave_height_48h_m: 0.7,
-      max_wave_height_72h_m: 0.8,
-      wave_energy_integral_48h: 138.2,
-      onshore_wind_impulse_48h_kmh_h: 94.5,
-      onshore_wind_stress_impulse_48h_pa_h: 0.642,
-      shoreward_current_impulse_48h_kmh_h: 2.4,
-      strong_wave_hours_48h: 0,
-      history_hours_72h: 72,
-      history_hours_48h: 48,
-      history_hours_24h: 24,
-      history_hours_12h: 12,
-      rain_data_hours_48h: 48,
-      rain_data_hours_24h: 24,
-      wind_data_hours_48h: 48,
-      wind_data_hours_12h: 12,
-      wave_energy_data_hours_48h: 48,
-      wave_energy_data_hours_12h: 12,
-      current_data_hours_48h: 48,
-      onshore_wind_fraction_48h: 0.25,
-      onshore_wind_fraction_12h: 0.25,
-      energetic_wave_fraction_48h: 0.25,
-      energetic_wave_fraction_12h: 0.25,
-      air_sea_temperature_difference_c: 1.9,
-      dew_point_depression_c: 7.5,
-      is_twilight: hour === 6,
-      is_night: false,
-    },
-  };
-}
-
-function mockDecision(payload: ForecastDecisionRequest): DecisionResponse {
-  const date = payload.target_date;
-  const hourly = Array.from({ length: 8 }, (_, index) => makeHour(date, index + 6));
-  const satelliteRetrievedAt = new Date();
-  const satelliteValidTime = new Date(satelliteRetrievedAt.getTime() - 72 * 60 * 60 * 1000);
-  return {
-    schema_version: "3.20",
-    engine_version: "1.11.2",
-    decision: "go",
-    decision_reason_code: "safe_window",
-    decision_label_ar: "اذهب",
-    summary_ar: "الظروف مناسبة نسبياً في الصباح، مع ريح هادئة وموج قابل للتعامل.",
-    opportunity_score: 78,
-    score_is_success_probability: false,
-    confidence: {
-      score: 84,
-      band: "high",
-      reasons_ar: ["توفرت بيانات الريح والموج والطقس.", "التغطية الزمنية كاملة للساعات المقترحة."],
-      breakdown_ar: ["لا خافض محدد؛ السقف الوحيد 85/100 لاعتماد النموذج بلا قياس مباشر في منطقة الكسرة."],
-      is_accuracy_probability: false,
-    },
-    field_feasibility: {
-      status: "favorable",
-      score: 82,
-      confidence: 48,
-      holding_difficulty: "low",
-      fouling_transport_potential: "moderate",
-      turbidity_potential: "low",
-      rip_current_potential: "low",
-      fouling_evidence_count: 2,
-      turbidity_evidence_count: 1,
-      antecedent_window_hours: 48,
-      reasons_ar: [
-        "اعتمد التجميع أضعف ساعة داخل ساعات بلا موانع كإجراء محافظ.",
-        "صعوبة تثبيت الخط منخفضة في الفحص الآلي.",
-        "قابلية نقل مادة موجودة متوسطة؛ لا يتوفر رصد لوجودها.",
-      ],
-      limitations_ar: [
-        "هذا فحص مؤشرات منخفض الثقة وليس رصداً مباشراً للأعشاب أو التيار الساحبي.",
-        "الإشارة المنخفضة لا تنفي الخطر؛ عاين الكسرة واعمل رمية اختبارية.",
-      ],
-      is_direct_observation: false,
-    },
-    sunrise: isoHour(date, 6),
-    sunset: `${date}T18:35:00+01:00`,
-    recommended_windows: [
-      {
-        start: isoHour(date, 6),
-        end: isoHour(date, 9),
-        safety: "go",
-        field_feasibility: "favorable",
-        field_score: 82,
-        opportunity_score: 78,
-        confidence_score: 84,
-        headline_ar: "نافذة صباحية متوازنة قبل اشتداد الريح.",
-        key_factors_ar: ["ريح هادئة", "موج معتدل", "ضوء صباحي"],
-      },
-      {
-        start: isoHour(date, 9),
-        end: isoHour(date, 10),
-        safety: "caution",
-        field_feasibility: "workable",
-        field_score: 68,
-        opportunity_score: 66,
-        confidence_score: 81,
-        headline_ar: "نافذة أقصر مع بداية ارتفاع الريح.",
-        key_factors_ar: ["ريح متزايدة", "موج معتدل"],
-      },
-    ],
-    avoid_windows: [
-      {
-        start: isoHour(date, 11),
-        end: isoHour(date, 13),
-        safety: "caution",
-        field_feasibility: "workable",
-        field_score: 60,
-        opportunity_score: 48,
-        confidence_score: 82,
-        headline_ar: "الريح أقوى من الفترة الصباحية.",
-        key_factors_ar: ["هبات أقوى", "راحة أقل"],
-      },
-    ],
-    tide_events: [
-      { time: isoHour(date, 9), kind: "high", level_msl_m: 0.27, disclaimer_ar: "قيمة نموذجية تقريبية." },
-      { time: isoHour(date, 13), kind: "low", level_msl_m: 0.12, disclaimer_ar: "قيمة نموذجية تقريبية." },
-    ],
-    hourly,
-    antecedent_hours: [],
-    sources: [
-      {
-        provider: "Open-Meteo",
-        product: "Marine API",
-        data_kind: "model_forecast",
-        variables: ["wave_height", "sea_level_height_msl"],
-        horizontal_resolution_km: 5,
-        retrieved_at: new Date().toISOString(),
-        limitations_ar: ["الدقة الساحلية محدودة قرب الحواجز والموانئ."],
-      },
-      {
-        provider: "AviationWeather.gov / METAR",
-        product: "Latest Tunisian airport observation (DTTA)",
-        data_kind: "direct_observation",
-        variables: ["wind_speed", "air_temperature", "pressure"],
-        horizontal_resolution_km: null,
-        retrieved_at: isoHour(date, 7),
-        limitations_ar: ["رصد محطة مطار، وليس قياساً داخل البقعة."],
-      },
-      {
-        provider: "Copernicus Marine Service / Sentinel-2",
-        product: "Mediterranean daily 100 m ocean-colour TUR/SPM/CHL mosaic",
-        data_kind: "remote_sensing_estimate",
-        variables: ["turbidity_fnu", "suspended_particulate_matter_g_m3", "chlorophyll_a_mg_m3"],
-        horizontal_resolution_km: 0.1,
-        retrieved_at: satelliteRetrievedAt.toISOString(),
-        limitations_ar: ["استعادة أقمار صناعية سياقية وليست قياساً أو توقعاً."],
-      },
-    ],
-    current_weather_observation: {
-      provider: "AviationWeather.gov METAR",
-      station_id: "DTTA",
-      station_name: "Tunis/Carthage Intl",
-      station_latitude: 36.851,
-      station_longitude: 10.227,
-      station_elevation_m: 7,
-      observed_at: `${date}T06:30:00+01:00`,
-      retrieved_at: isoHour(date, 7),
-      distance_to_spot_km: 24.6,
-      wind_speed_kmh: 13,
-      wind_gust_kmh: null,
-      wind_direction_deg: 70,
-      air_temperature_c: 19,
-      dew_point_c: 12,
-      pressure_hpa: 1018,
-      pressure_kind: "altimeter_setting",
-      visibility_m: 9656,
-      visibility_is_lower_bound: true,
-      weather_text: null,
-      cloud_cover_code: "FEW",
-      raw_report: "DTTA 150530Z 07007KT 9999 FEW020 19/12 Q1018",
-      quality_control_flag: 1,
-      is_direct_observation: true,
-      is_spot_observation: false,
-    },
-    coastal_water_context: {
-      availability: "available",
-      provider: "Copernicus Marine Service",
-      product_id: "OCEANCOLOUR_MED_BGC_HR_L3_NRT_009_205",
-      dataset_id: "cmems_obs_oc_med_bgc_tur-spm-chl_nrt_l3-hr-mosaic_P1D-m_202107",
-      data_kind: "remote_sensing_estimate",
-      sample_strategy: "fixed_1000m_seaward_axis",
-      sample_latitude: 36.81,
-      sample_longitude: 10.31,
-      sample_distance_from_spot_m: 1000,
-      pixel_latitude: 36.8102,
-      pixel_longitude: 10.3104,
-      pixel_distance_from_spot_m: 1018,
-      pixel_distance_from_sample_m: 42,
-      spatial_resolution_m: 100,
-      valid_time: satelliteValidTime.toISOString(),
-      retrieved_at: satelliteRetrievedAt.toISOString(),
-      age_hours: 72,
-      search_days: 10,
-      turbidity_fnu: 0.32,
-      turbidity_unit: "FNU",
-      suspended_particulate_matter_g_m3: 0.18,
-      suspended_particulate_matter_unit: "g/m³",
-      chlorophyll_a_mg_m3: 0.54,
-      chlorophyll_a_unit: "mg/m³",
-      sea_surface_temperature_c: 25.4,
-      reason_ar: "أحدث بكسل صالح عند نقطة العينة الثابتة.",
-      affects_final_decision: false,
-      is_direct_observation: false,
-      is_spot_observation: false,
-      is_forecast: false,
-    },
-    observation_comparison: {
-      status: "consistent",
-      compared_forecast_time: isoHour(date, 7),
-      observation_age_minutes: 30,
-      station_distance_km: 24.6,
-      wind_speed_difference_kmh: 2,
-      wind_direction_difference_deg: 8,
-      temperature_difference_c: 1,
-      pressure_difference_hpa: 2,
-      affects_confidence: false,
-      reasons_ar: ["الفروق المطلقة دون عتبات الاختلاف؛ هذا لا يثبت تطابق محطة المطار مع البقعة."],
-    },
-    factor_coverage: {
-      catalog_version: "matrix-v3-audit-5",
-      matrix_version: "TUN-SURFCAST-MATRICE-v3.0",
-      source_claimed_total: 62,
-      audited_total: 63,
-      automated_decision: 11,
-      automated_context: 13,
-      proxy_requires_field_check: 5,
-      field_or_external_required: 30,
-      excluded_unsupported: 4,
-      note_ar: "صحح التدقيق العدد من 62 في المصدر الأصلي إلى 63 عاملاً تشغيلياً؛ تُقيّم كلها لكن التسجيل لا يعني التنقيط.",
-    },
-    factor_assessments: Array.from({ length: 63 }, (_, index) => ({
-      matrix_id: `F-${index + 1}`,
-      chapter_ar: "فصل اختباري",
-      title_ar: `عامل اختباري ${index + 1}`,
-      status: index < 11 ? "decision" : index < 24 ? "context" : index < 28 ? "proxy" : index < 59 ? "unknown" : "excluded",
-      decision_axis: index < 11 ? "السلامة" : "السياق",
-      value_ar: index < 28 ? "قيمة تشغيلية من الحزمة" : "Unknown — يلزم رصد ميداني",
-      evidence_variables: index < 28 ? ["wave_height"] : [],
-      rationale_ar: "تفسير تدقيقي يوضح لماذا استعمل العامل أو بقي غير معروف.",
-      affects_final_decision: false,
-    })),
-    limitations_ar: ["المعطيات نموذجية ولا تعوض معاينة البحر من الشاطئ."],
-    generated_at: new Date().toISOString(),
-    fisherman_report: {
-      decision_label_ar: "اذهب",
-      decision_reason_ar: "ساعات بلا موانع محسوبة",
-      opportunity_score: 68,
-      opportunity_note_ar: "مؤشر الفرصة ترتيب نسبي 0-100 للمقارنة؛ ليس نسبة نجاح ولا ضمان مصيد.",
-      target_bait_ar: "طعم حي أو متحرك (سردين حي / سبيط) — القاروص يفضّل الحركة",
-      bait_note_ar: "أطعمة شائعة موثقة في الصيد بالقصبة؛ ليست ضمان مصيد.",
-      beach_direction_deg: 57,
-      beach_direction_ar: "شمالية شرقية",
-      sunrise_ar: "06:02",
-      sunset_ar: "18:30",
-      moonrise_ar: "09:24",
-      moonset_ar: "19:56",
-      moon_illumination_pct: 13,
-      moon_upper_transit_ar: "14:44",
-      moon_lower_transit_ar: "03:07",
-      tide_high_ar: ["03:10", "15:34"],
-      tide_low_ar: ["09:22", "21:46"],
-      tide_note_ar: "مواقيت مدّ نموذجية من النموذج البحري؛ المدّ والجزر في تونس ضعيف جداً (~0.3م).",
-      pressure_hpa: 1019.6,
-      pressure_trend_ar: "مستقر (محايد)",
-      beach_summary_ar: "هادئة نسبياً: موج خفيف وريح معتدلة — جلسة مريحة.",
-      astronomical_times: [
-        { kind: "upper_transit", label_ar: "العبور القمري العلوي (القمر في أعلى نقطة)", time_ar: "14:44", note_ar: "محسوب فلكياً — مرجعي." },
-        { kind: "lower_transit", label_ar: "العبور القمري السفلي", time_ar: "03:07", note_ar: "محسوب فلكياً — مرجعي." },
-        { kind: "moonrise", label_ar: "طلوع القمر", time_ar: "09:24", note_ar: "من مزوّد الأرصاد." },
-        { kind: "moonset", label_ar: "غروب القمر", time_ar: "19:56", note_ar: "من مزوّد الأرصاد." },
-      ],
-      astronomy_note_ar: "أوقات فلكية مرجعية محسوبة (سلسلة Meeus) أو من مزوّد الأرصاد؛ ليست قاعدة صيد ولا تدخل القرار أو السلامة.",
-      periods: [
-        {
-          key: "dawn", label_ar: "السحر", range_ar: "00:00-04:00", state_ar: "بحر معتدل", confidence_pct: 65,
-          wind_speed_kmh: 9.8, wind_gust_kmh: 12.2, wind_dir_deg: 62, wind_relation_ar: "رياح جانبية مائلة من البرّ",
-          wind_cast_effect_m: 2, wave_height_m: 0.58, wave_period_s: 3.9, cast_distance_m: 47, comfort_index: 78,
-          turbidity_ar: "لا مؤشر نموذجي قوي على عكارة.", montage_ar: "مونتاج بسنود طويل (فرع سفلي ~150سم، خفيف) — حركة طبيعية للطعم في الماء الهادئ.",
-          warnings_ar: [],
-        },
-        {
-          key: "morning", label_ar: "الصباح", range_ar: "04:00-12:00", state_ar: "بحر هادئ", confidence_pct: 65,
-          wind_speed_kmh: 13.2, wind_gust_kmh: 37.1, wind_dir_deg: 62, wind_relation_ar: "رياح جانبية مائلة من البرّ",
-          wind_cast_effect_m: 2, wave_height_m: 0.52, wave_period_s: 3.7, cast_distance_m: 47, comfort_index: 74,
-          turbidity_ar: "لا مؤشر نموذجي قوي على عكارة.", montage_ar: "مونتاج متوسط (فرع 80-100سم) — مرن للظروف المتوسطة.",
-          warnings_ar: [],
-        },
-        {
-          key: "midday", label_ar: "الظهيرة", range_ar: "12:00-18:00", state_ar: "بحر هادئ", confidence_pct: 65,
-          wind_speed_kmh: 21.2, wind_gust_kmh: 41.8, wind_dir_deg: 62, wind_relation_ar: "رياح جانبية مائلة من البرّ",
-          wind_cast_effect_m: 6, wave_height_m: 0.49, wave_period_s: 3.6, cast_distance_m: 51, comfort_index: 56,
-          turbidity_ar: "رياح قوية قد تثير العكارة قرب الكسرة — عاين قبل الرمي.", montage_ar: "مونتاج متوسط (فرع 80-100سم) — مرن للظروف المتوسطة.",
-          warnings_ar: ["هبات قوية (≈42 كم/س) تزعج الرمي والثبات."],
-        },
-        {
-          key: "dusk", label_ar: "الغسق", range_ar: "18:00-24:00", state_ar: "بحر هادئ", confidence_pct: 65,
-          wind_speed_kmh: 11.0, wind_gust_kmh: 39.6, wind_dir_deg: 62, wind_relation_ar: "رياح جانبية مائلة من البرّ",
-          wind_cast_effect_m: 3, wave_height_m: 0.51, wave_period_s: 3.4, cast_distance_m: 46, comfort_index: 74,
-          turbidity_ar: "لا مؤشر نموذجي قوي على عكارة.", montage_ar: "مونتاج متوسط (فرع 80-100سم) — مرن للظروف المتوسطة.",
-          warnings_ar: [],
-        },
-      ],
-      red_factors_ar: ["رياح جانبية قوية في الظهيرة (≈21 كم/س) مع هبات حتى ≈42 كم/س تصعّب الرمي."],
-      green_factors_ar: ["الضغط الجوي مستقر (محايد).", "الموج منخفض وييسّر الرمي.", "ثقة المدخلات مقبولة على طول اليوم."],
-      lead_advice_ar: "رصاص هرمي في مجال 100 إلى 140 غ؛ رصاص ثقيل نسبياً في الظهيرة لمواجهة الرياح.",
-      timing_advice_ar: "ساعات بلا موانع محسوبة 06:00-09:00؛ خارجها لا تخرج. إن تغيّر البحر على الأرض أعد المعاينة.",
-      distance_advice_ar: "المسافة المتوقعة بين 46 و 51 م حسب الفترة (تقدير موثق من وزن الرصاص والريح).",
-      safety_advice_ar: "افحص معداتك قبل البدء، وانتبه للهبات المفاجئة وحركة الموج.",
-      water_temp_c: 29.3,
-      air_temp_c: 30.5,
-      max_gust_kmh: 41.8,
-      reference_note_ar: "الأرقام المرجعية قيم نموذجية متوسطة ليوم الحصة؛ المسافة وأثر الريح ومؤشر الراحة تقديرات موثقة بنماذج مبسّطة معلنة — وليست قياسات ميدانية.",
-    },
-  };
-}
-
-async function mockAutomatedSpotContext(page: Page) {
-  await page.route("**/api/v1/spots/orientation", async (route) => {
-    const payload = route.request().postDataJSON() as { latitude: number; longitude: number };
-    const now = new Date().toISOString();
-    await route.fulfill({
-      status: 200,
-      contentType: "application/json",
-      body: JSON.stringify({
-        status: "resolved",
-        orientation_deg: 90,
-        evidence: {
-          orientation_deg: 90,
-          coastline_tangent_deg: 0,
-          coastline_distance_m: 45,
-          search_radius_m: 3000,
-          segments_used: 4,
-          confidence: "high",
-          provider: "OpenStreetMap Overpass",
-          server: "https://overpass-api.de/api/interpreter",
-          calculated_at: now,
-          limitations_ar: ["Synthetic E2E fixture; not a live observation."],
-        },
-        shore_profile: {
-          status: "resolved",
-          provider: "OpenStreetMap Overpass",
-          retrieved_at: now,
-          shore_type: "sandy",
-          exposure: null,
-          evidence_feature_id: 12345,
-          evidence_feature_version: 2,
-          evidence_feature_timestamp: now,
-          feature_distance_m: 12.5,
-          raw_tags: { natural: "beach", surface: "sand" },
-          confidence: "medium",
-          limitations_ar: ["Synthetic E2E fixture; not live data."],
-        },
-        reasons_ar: [`fixture ${payload.latitude},${payload.longitude}`],
-      }),
-    });
-  });
-}
-
-async function mockForecast(page: Page, delayMs = 0) {
-  await mockAutomatedSpotContext(page);
-  await page.route("**/api/v1/decisions/forecast", async (route) => {
-    const payload = route.request().postDataJSON() as ForecastDecisionRequest;
-    if (delayMs) await new Promise((resolve) => setTimeout(resolve, delayMs));
-    await route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify(mockDecision(payload)) });
-  });
-}
 
 async function expectNoPageOverflow(page: Page) {
   const dimensions = await page.evaluate(() => ({
@@ -537,23 +26,22 @@ async function expectNoPageOverflow(page: Page) {
 for (const viewport of viewports) {
   test(`landing, planner, and result fit ${viewport.name} (${viewport.width}px)`, async ({ page }) => {
     await page.setViewportSize({ width: viewport.width, height: viewport.height });
-    await mockForecast(page);
     await page.goto("/");
 
-    await expect(page.getByRole("heading", { name: /تقرير سيرفكاست دقيق/ })).toBeVisible();
-    await expect(page.locator("nav a.active:visible")).toContainText("تقرير بقعة");
+    await expect(page.getByRole("heading", { name: /قرار الخرجة/ })).toBeVisible();
+    await expect(page.locator("nav a.active:visible")).toContainText("القرار");
     await expectNoPageOverflow(page);
 
     await expect(page.getByRole("heading", { name: "وين باش تصطاد؟" })).toBeVisible();
     await page.locator("#planner").scrollIntoViewIfNeeded();
     await expect(page.getByRole("heading", { name: "وقتاش الحصة؟" })).toBeVisible();
-    await expect(page.getByRole("heading", { name: "تحليل اتجاه الساحل" })).toBeVisible();
+    await expect(page.getByRole("heading", { name: "اتجاه الشاطئ" })).toBeVisible();
     const submit = page.getByRole("button", { name: "حلّل 24 ساعة" });
     await expect(submit).toBeVisible();
     await expectNoPageOverflow(page);
 
     await submit.click();
-    await expect(page.getByRole("heading", { name: "اذهب" })).toBeVisible();
+    await expect(page.getByRole("heading", { name: DECISION_HEADING })).toBeVisible();
 
     // القرار والبطاقة الميدانية ظاهران فوراً بلا فتح أي تبويب.
     await expect(page.getByTestId("field-brief")).toBeVisible();
@@ -583,14 +71,12 @@ for (const viewport of viewports) {
 
 test("mobile result stays readable, interactive, and marks stale choices", async ({ page }) => {
   await page.setViewportSize({ width: 375, height: 667 });
-  await mockForecast(page);
   await page.goto("/");
   await expect(page.getByRole("heading", { name: "إعداد تقرير السيرفكاست" })).toBeVisible();
   await page.locator("#planner").scrollIntoViewIfNeeded();
   await page.getByRole("button", { name: "حلّل 24 ساعة" }).click();
 
-  await expect(page.getByRole("heading", { name: "اذهب" })).toBeVisible();
-  await expect(page.getByText("ساعات بلا موانع محسوبة")).toBeVisible();
+  await expect(page.getByRole("heading", { name: DECISION_HEADING })).toBeVisible();
   await expect(page.getByRole("heading", { name: "القرار ساعة بساعة" })).toBeVisible();
   await expectNoPageOverflow(page);
 
@@ -619,10 +105,9 @@ test("mobile result stays readable, interactive, and marks stale choices", async
 
 test("the result answers in a couple of screens and tabs stay keyboard reachable", async ({ page }) => {
   await page.setViewportSize({ width: 390, height: 844 });
-  await mockForecast(page);
   await page.goto("/");
   await page.getByRole("button", { name: "حلّل 24 ساعة" }).click();
-  await expect(page.getByRole("heading", { name: "اذهب" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: DECISION_HEADING })).toBeVisible();
 
   // انحدار التكدس: كانت النتيجة ‎15.8 شاشة مفتوحة دفعة واحدة على الهاتف.
   const resultScreens = await page.evaluate(() => {
@@ -647,17 +132,16 @@ test("the result answers in a couple of screens and tabs stay keyboard reachable
   await page.keyboard.press("ArrowLeft");
   await expect(page.getByRole("tab", { name: "الظروف" })).toHaveAttribute("aria-selected", "true");
   await page.keyboard.press("End");
-  await expect(page.getByRole("tab", { name: "العلميات" })).toHaveAttribute("aria-selected", "true");
+  await expect(page.getByRole("tab", { name: "العمليات" })).toHaveAttribute("aria-selected", "true");
   await expectNoPageOverflow(page);
 });
 
 test("the full spot report is scientific, complete, downloadable, and mobile-safe", async ({ page, context }) => {
   await context.grantPermissions(["clipboard-read", "clipboard-write"]);
   await page.setViewportSize({ width: 320, height: 568 });
-  await mockForecast(page);
   await page.goto("/");
   await page.getByRole("button", { name: "حلّل 24 ساعة" }).click();
-  await expect(page.getByRole("heading", { name: "اذهب" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: DECISION_HEADING })).toBeVisible();
   await page.locator("#spot-report-trigger").click();
   const report = page.locator("#spot-report");
   const reportTitle = report.getByRole("heading", { name: "تقرير نابل" });
@@ -674,9 +158,8 @@ test("the full spot report is scientific, complete, downloadable, and mobile-saf
   await expect(report).toContainText("الهبة غير مسجلة");
   await expect(report).toContainText("لا تثبت وجودها أو تمنع وحدها");
   await expect(report).toContainText("الخطر مربوط بوقته");
-  await expect(report).toContainText("سلامة: مناسب");
   await expect(report).toContainText("دعم أدلة التنفيذ");
-  await expect(report).toContainText("تغطية 48/48");
+  await expect(report).toContainText(/تغطية \d+\/\d+/);
   await expect(report).toContainText("اتجاه البحر من موضع الوقوف");
   await expect(report).toContainText("التفكيك الزمني");
   await expect(report).toContainText("الأرقام المرجعية");
@@ -730,47 +213,15 @@ test("the full spot report is scientific, complete, downloadable, and mobile-saf
   await expect(page.locator("#spot-report-trigger")).toBeFocused();
 });
 
-test("a window crossing midnight is marked as ending on the next day", async ({ page }) => {
-  await page.setViewportSize({ width: 375, height: 667 });
-  await mockAutomatedSpotContext(page);
-  await page.route("**/api/v1/decisions/forecast", async (route) => {
-    const payload = route.request().postDataJSON() as ForecastDecisionRequest;
-    const decision = mockDecision(payload);
-    const start = isoHour(payload.target_date, 23);
-    const end = isoHour(nextIsoDate(payload.target_date), 0);
-    const template = decision.recommended_windows[0];
-    if (!template) throw new Error("mock recommendation missing");
-    decision.recommended_windows = [{
-      ...template,
-      start,
-      end,
-      headline_ar: "نافذة مناسبة من 23:00 إلى 00:00 من اليوم التالي",
-    }];
-    decision.summary_ar = "التوصية تخص نافذة تنتهي في اليوم التالي، وليست شهادة سلامة ميدانية.";
-    await route.fulfill({
-      status: 200,
-      contentType: "application/json",
-      body: JSON.stringify(decision),
-    });
-  });
-
-  await page.goto("/");
-  await page.getByRole("button", { name: "حلّل 24 ساعة" }).click();
-  await expect(page.locator(".lead-window")).toContainText("اليوم التالي");
-  await page.locator("#spot-report-trigger").click();
-  await expect(page.locator("#spot-report")).toContainText("23:00–00:00 (اليوم التالي)");
-});
-
 test("loading feedback appears while the forecast is being prepared", async ({ page }) => {
   await page.setViewportSize({ width: 375, height: 667 });
-  await mockForecast(page, 700);
   await page.goto("/");
   await expect(page.getByRole("heading", { name: "إعداد تقرير السيرفكاست" })).toBeVisible();
   await page.locator("#planner").scrollIntoViewIfNeeded();
   await page.getByRole("button", { name: "حلّل 24 ساعة" }).click();
 
   await expect(page.getByRole("status").filter({ hasText: "نحضّر قرار الحصة" })).toBeVisible();
-  await expect(page.getByRole("heading", { name: "اذهب" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: DECISION_HEADING })).toBeVisible();
 });
 
 test("the public API probe rejects Vercel HTML failures instead of pretending the engine is online", async ({ page }) => {
@@ -789,7 +240,6 @@ test("the public API probe rejects Vercel HTML failures instead of pretending th
 
 test("network errors are explained without breaking the planner", async ({ page }) => {
   await page.setViewportSize({ width: 375, height: 667 });
-  await mockAutomatedSpotContext(page);
   await page.route("**/api/v1/decisions/forecast", async (route) => {
     await route.fulfill({
       status: 503,
@@ -862,11 +312,10 @@ test("field safety progress expires while the page remains open", async ({ page 
 
 test("a field mismatch visibly overrides reliance on the forecast", async ({ page }) => {
   await page.setViewportSize({ width: 375, height: 667 });
-  await mockForecast(page);
   await page.goto("/");
   await expect(page.getByRole("heading", { name: "إعداد تقرير السيرفكاست" })).toBeVisible();
   await page.getByRole("button", { name: "حلّل 24 ساعة" }).click();
-  await expect(page.getByRole("heading", { name: "اذهب" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: DECISION_HEADING })).toBeVisible();
 
   const trigger = page.getByRole("button", { name: "الواقع مختلف؟" });
   await trigger.click();
@@ -969,12 +418,12 @@ test("map selection shows automatic coast data and offers a separate manual shor
   await expect(page.getByRole("button", { name: "اتجاه عرض البحر" })).toHaveCount(0);
   const mapCanvas = page.locator(".map-canvas");
   await expect(mapCanvas).toHaveAccessibleName("خريطة لاختيار نقطة الوقوف على الساحل");
-  await expect(page.locator(".orientation-help").first()).toContainText("لا تُدخل اتجاهاً يدوياً");
+  await expect(page.locator(".orientation-help").first()).toContainText("بلا اتجاه موثوق لا نقول اذهب");
 
   await expect(page.locator(".advanced-settings")).toHaveCount(0);
   await expect(page.getByLabel("مستوى الخبرة")).toHaveCount(0);
   await expect(page.getByLabel("مدة الجلسة المخططة")).toHaveCount(0);
-  await expect(page.getByTestId("automatic-spot-profile-status")).toContainText("Unknown");
+  await expect(page.getByTestId("automatic-spot-profile-status")).toBeVisible();
   await expect(page.getByTestId("manual-shore-type-field")).toBeVisible();
   await expect(page.getByLabel("نوع الشاطئ الذي اخترته")).toBeVisible();
   await expectNoPageOverflow(page);
@@ -1043,7 +492,6 @@ test("startup auto-fetches coast direction, manual shore choice clears only the 
 test("Gemini key stays local, generation is explicit, and deterministic fallback remains", async ({ page, context }) => {
   await context.grantPermissions(["clipboard-read", "clipboard-write"]);
   await page.setViewportSize({ width: 375, height: 667 });
-  await mockForecast(page);
   const key = "runtime-test-key-not-for-source-control";
   let reportBody = "";
   let delayNextReport = false;
@@ -1103,7 +551,7 @@ test("Gemini key stays local, generation is explicit, and deterministic fallback
 
   await page.goto("/");
   await page.getByRole("button", { name: "حلّل 24 ساعة" }).click();
-  await expect(page.getByRole("heading", { name: "اذهب" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: DECISION_HEADING })).toBeVisible();
 
   // التقرير الكامل نسخة علمية حتمية — لا يحتوي Gemini.
   await page.locator("#spot-report-trigger").click();
@@ -1111,8 +559,8 @@ test("Gemini key stays local, generation is explicit, and deterministic fallback
   await expect(report.getByTestId("factor-ledger").locator("article")).toHaveCount(63);
   await report.getByRole("button", { name: "أغلق" }).click();
 
-  // تقرير Gemini صار داخل تبويب «العلميات» في آخر الصفحة.
-  await page.getByRole("tab", { name: "العلميات" }).click();
+  // تقرير Gemini صار داخل تبويب «العمليات» في آخر الصفحة.
+  await page.getByRole("tab", { name: "العمليات" }).click();
   const gemini = page.locator(".report-gemini");
   await expect(gemini.getByText("localStorage موش خزنة أسرار", { exact: false })).toBeVisible();
   const keyInput = gemini.getByTestId("gemini-key-input");

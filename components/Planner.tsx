@@ -541,9 +541,6 @@ export function Planner({ value, loading, error, hasResult, isDirty, onChange, o
             </select>
             <small>اختيارك يدخل الحساب. لا يضمن «اذهب» ولا يغني عن عينك على الأرض.</small>
           </label>
-          <p className="orientation-help">
-            <Info size={16} /> قبل «اذهب» يحاول التطبيق قراءة نشرة INM الرسمية. إن تعذر التأكد: لا تذهب. راجع النشرة بنفسك أيضاً من صفحة INM.
-          </p>
         </section>
 
 

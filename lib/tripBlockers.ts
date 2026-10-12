@@ -118,11 +118,6 @@ export function buildTripBlockers(result: DecisionResponse): TripBlockerRow[] {
       : "";
   }
 
-  const inmBlocks =
-    result.official_warning_check?.status === "warning_active" ||
-    result.decision_reason_code === "official_warning" ||
-    result.decision_reason_code === "official_warning_unverified";
-
   const dataBlocks = [
     "critical_data_missing",
     "stale_forecast_data",
@@ -179,14 +174,6 @@ export function buildTripBlockers(result: DecisionResponse): TripBlockerRow[] {
       blocksGo: vis.blocksGo,
       detail: visM == null ? "الرؤية ناقصة." : `أدنى رؤية ${(visM / 1000).toFixed(1)} كم (جوّية لا شفافية ماء).`,
       hourTime: firstHourWith(result, "visibility_no_go", "visibility_caution"),
-    },
-    {
-      id: "inm",
-      group: "سلامة",
-      label: "نشرة INM",
-      tone: inmBlocks ? "block" : result.official_warning_check?.status === "verified_clear" ? "clear" : "unknown",
-      blocksGo: inmBlocks,
-      detail: result.official_warning_check?.explanation_ar ?? "فحص النشرة الرسمية شرط للذهاب.",
     },
     {
       id: "data",

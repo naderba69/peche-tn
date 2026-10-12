@@ -15,7 +15,6 @@ from .enums import (
     FactorImpact,
     FieldFeasibilityLevel,
     ForceMajeureKind,
-    InmCheckStatus,
     ObservationMatchStatus,
     PotentialLevel,
     RiskSeverity,
@@ -82,7 +81,6 @@ from .models import (
     HoldingBreakdown,
     HourActivity,
     HourDecision,
-    InmWarningAudit,
     ObservationComparison,
     PeriodActivity,
     RankedSpot,
@@ -625,7 +623,6 @@ class DecisionEngine:
             "مؤشرات جرّ الخط ونقل الأعشاب أو الحطام والعكارة والتيار الساحبي فحص احتمالي منخفض الثقة، وليست رصداً لحالة البقعة أو قياس NTU.",
             "بروكسي النقل وحده تنبيه لا يمنع؛ الاستثناء الاحترازي هو CHL كثيف حديث (≤48 ساعة) مع نقل مرتفع، ويظل خطراً غير مؤكد ميدانياً.",
             "حدود السلامة سياسة محافظة قابلة للمعايرة وليست بديلاً عن نشرات الحماية المدنية والحرس البحري أو تقديرك الميداني.",
-            "GO النهائي يتطلب تحققاً آلياً حديثاً من صفحة BMS الرسمية لـINM وتغطية السواحل التونسية؛ التعذر أو تعارض محتوى النشرة يبقى NO_GO، ولا يستبدله إقرار يدوي.",
             "البلاغات الميدانية ورمية الاختبار وإشارات التحذير التي يدخلها المستخدم لا تدخل في هذا القرار.",
             "مدة التحليل ثابتة 24 ساعة. عند غياب نوع ساحل من OSM واختيار المستخدم، يُعرض تحليل الطقس لكن يبقى القرار NO_GO؛ وتُستخدم أكثر عتبة موج محافظة دون تخمين النوع. اختيار المستخدم يُوسم منفصلاً ولا يُعرض كرصد OSM.",
             "كل القيم الجوية والبحرية الساعية القادمة من Open-Meteo توقعات نموذجية؛ رصد METAR منفصل وفي محطة مطار لا داخل البقعة.",
@@ -687,61 +684,10 @@ class DecisionEngine:
         response.fisherman_report = build_fisherman_report(dataset, response)
         return response
 
-    def apply_official_warning_check(
-        self,
-        dataset: ForecastDataset,
-        decision: DecisionResponse,
-        audit: InmWarningAudit,
-    ) -> DecisionResponse:
-        """Apply the INM AND-gate without discarding the computed forecast report."""
-        if decision.decision != DecisionLevel.GO or audit.status == InmCheckStatus.VERIFIED_CLEAR:
-            return decision.model_copy(update={"official_warning_check": audit})
-
-        active_warning = audit.status == InmCheckStatus.WARNING_ACTIVE
-        reason = (
-            DecisionReasonCode.OFFICIAL_WARNING
-            if active_warning
-            else DecisionReasonCode.OFFICIAL_WARNING_UNVERIFIED
-        )
-        summary = (
-            "الحالة النهائية: لا تذهب. اجتازت بيانات الطقس والتنفيذ الفحص المبدئي، "
-            "لكن نشرة INM تتضمن تحذيراً سارياً يغطي وقت الخروج."
-            if active_warning
-            else "الحالة النهائية: لا تذهب. اجتازت بيانات الطقس والتنفيذ الفحص المبدئي، "
-            "لكن تعذر إثبات خلو نشرة INM الحديثة ونطاق تغطيتها؛ لا يُستبدل ذلك بفحص يدوي."
-        )
-        limitations = list(decision.limitations_ar)
-        limitations.append(audit.explanation_ar)
-        gated = decision.model_copy(
-            update={
-                "decision": DecisionLevel.NO_GO,
-                "decision_reason_code": reason,
-                "decision_label_ar": "لا تذهب",
-                "summary_ar": summary,
-                "recommended_windows": [],
-                "gear_recommendation": None,
-                "force_majeure_kind": _force_majeure_for(reason),
-                "official_warning_check": audit,
-                "limitations_ar": _unique(limitations),
-                "factor_assessments": self._factor_assessments(
-                    dataset,
-                    decision.hourly,
-                    decision.field_feasibility,
-                    DecisionLevel.NO_GO,
-                    reason,
-                ),
-                "fisherman_report": None,
-            }
-        )
-        gated.fisherman_report = build_fisherman_report(dataset, gated)
-        return gated
-
     def rank_spots(
         self,
         datasets: list[tuple[SpotCandidate, ForecastDataset | None]],
         target_date: date,
-        *,
-        official_warning_check: InmWarningAudit | None = None,
     ) -> RankSpotsResponse:
         """Evaluate several spots and rank them best-to-weakest (D13).
 
@@ -779,12 +725,6 @@ class DecisionEngine:
                 continue
             try:
                 result = self.evaluate(dataset)
-                if official_warning_check is not None and result.decision == DecisionLevel.GO:
-                    result = self.apply_official_warning_check(
-                        dataset,
-                        result,
-                        official_warning_check,
-                    )
             except InsufficientDataError:
                 ranked.append(error_entry(candidate, "لا توجد ساعات كافية في التاريخ المطلوب."))
                 continue
@@ -845,7 +785,6 @@ class DecisionEngine:
             target_date=target_date,
             generated_at=datetime.now(timezone),
             ranked=ranked,
-            official_warning_check=official_warning_check,
             notes_ar=[
                 "الترتيب: بقع اذهب أولاً ثم لا تذهب. داخل كل مجموعة التنفيذ ثم الترتيب النسبي — لا يفتح بقعة ممنوعة.",
                 "مؤشر الفرصة ترتيب نسبي وليس احتمال مصيد؛ ومعطيات كل بقعة نماذج أفقية نحو 8 كم وتحتاج معاينة ميدانية قبل القرار.",
@@ -4622,8 +4561,6 @@ class DecisionEngine:
             DecisionReasonCode.SAFE_WINDOW: "نافذة اجتازت الحدود الآلية وقابلة للتنفيذ مبدئياً",
             DecisionReasonCode.FOULING_CONFIRMED: "رمز قديم غير مستخدم؛ الإفادات الميدانية والرمية اليدوية لا تدخل في القرار الحالي",
             DecisionReasonCode.FOULING_PROXY_RISK: "إشارة CHL حديثة مع نقل نموذجي مرتفع؛ خطر صوفة محتمل غير مؤكد ميدانياً",
-            DecisionReasonCode.OFFICIAL_WARNING: "تحذير رسمي ساري يمنع التوصية بالخروج",
-            DecisionReasonCode.OFFICIAL_WARNING_UNVERIFIED: "تعذر التحقق آلياً من حداثة تحذير INM ونطاق تغطيته",
             DecisionReasonCode.TRIP_RUIN_CONFIRMED: "عامل مُفسِد مؤكد (قناديل/حطام/تعكر كثيف) يجعل الخرجة غير مجدية",
             DecisionReasonCode.FORECAST_HORIZON_EXCEEDED: "الفترة المطلوبة تتجاوز أفق التوقع التشغيلي 72 ساعة",
             DecisionReasonCode.STALE_FORECAST_DATA: "تعذر جلب توقع حديث؛ بيانات الكاش القديمة لا تسمح بإصدار GO",
@@ -5200,10 +5137,7 @@ def _worst_field_feasibility(
 
 
 def _force_majeure_for(reason_code: DecisionReasonCode) -> ForceMajeureKind:
-    """Map the reason code to the single hard blocker behind the decision.
-
-    access_legal carries the official marine warning (INM bulletin, D14).
-    """
+    """Map the reason code to the single hard blocker behind the decision."""
     return {
         DecisionReasonCode.SAFE_WINDOW: ForceMajeureKind.NONE,
         DecisionReasonCode.SAFETY_HAZARD: ForceMajeureKind.SAFETY,
@@ -5212,8 +5146,6 @@ def _force_majeure_for(reason_code: DecisionReasonCode) -> ForceMajeureKind:
         DecisionReasonCode.CONSERVATIVE_UNCERTAINTY: ForceMajeureKind.DATA,
         DecisionReasonCode.FOULING_CONFIRMED: ForceMajeureKind.FOULING,
         DecisionReasonCode.FOULING_PROXY_RISK: ForceMajeureKind.FOULING,
-        DecisionReasonCode.OFFICIAL_WARNING: ForceMajeureKind.ACCESS_LEGAL,
-        DecisionReasonCode.OFFICIAL_WARNING_UNVERIFIED: ForceMajeureKind.DATA,
         DecisionReasonCode.TRIP_RUIN_CONFIRMED: ForceMajeureKind.TRIP_RUIN,
         DecisionReasonCode.FORECAST_HORIZON_EXCEEDED: ForceMajeureKind.DATA,
         DecisionReasonCode.STALE_FORECAST_DATA: ForceMajeureKind.DATA,

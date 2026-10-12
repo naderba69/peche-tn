@@ -128,7 +128,7 @@ const decisionCopy: Record<DecisionLevel, { eyebrow: string; title: string; text
   },
 };
 
-const noGoCategory: Record<DecisionReasonCode, "safety" | "field" | "official" | "data" | "other"> = {
+const noGoCategory: Record<DecisionReasonCode, "safety" | "field" | "data" | "other"> = {
   safe_window: "other",
   safety_hazard: "safety",
   field_infeasible: "field",
@@ -136,19 +136,10 @@ const noGoCategory: Record<DecisionReasonCode, "safety" | "field" | "official" |
   conservative_uncertainty: "data",
   fouling_confirmed: "other",
   fouling_proxy_risk: "other",
-  official_warning: "official",
-  official_warning_unverified: "data",
   trip_ruin_confirmed: "other",
   forecast_horizon_exceeded: "data",
   stale_forecast_data: "data",
 };
-
-const inmStatusLabel = {
-  verified_clear: "تحقق آلي موثوق: لا يوجد تحذير مانع",
-  warning_active: "تحذير INM نشط يغطي النافذة",
-  unverified: "تعذر التحقق؛ القرار يبقى NO_GO",
-  not_checked: "لم يلزم الفحص لأن بوابة أخرى أصدرت NO_GO",
-} as const;
 
 function uniqueFactors(hours: HourDecision[], predicate: (factor: Factor) => boolean): Factor[] {
   const factors = new Map<string, Factor>();
@@ -396,29 +387,10 @@ export function DecisionResult({ result, request, stale = false }: DecisionResul
         <section className={`no-go-explanation no-go-${noGoCategory[result.decision_reason_code]}`} role="alert">
           <AlertOctagon size={20} />
           <div>
-            <strong>{result.decision_reason_code === "official_warning" ? "منع رسمي من INM" : result.decision_reason_code === "official_warning_unverified" ? "بوابة INM غير متحققة" : result.decision_reason_code === "safety_hazard" ? "منع بسبب خطر بحري/جوي" : result.decision_reason_code === "field_infeasible" ? "منع بسبب صعوبة التنفيذ" : result.decision_reason_code === "critical_data_missing" && result.spot_profile?.shore_type == null ? "نوع الشاطئ غير محدد" : result.decision_reason_code === "stale_forecast_data" || result.decision_reason_code === "forecast_horizon_exceeded" || result.decision_reason_code === "critical_data_missing" ? "منع بسبب جودة البيانات أو أفقها" : "سبب منع آخر"}</strong>
+            <strong>{result.decision_reason_code === "safety_hazard" ? "منع بسبب خطر بحري/جوي" : result.decision_reason_code === "field_infeasible" ? "منع بسبب صعوبة التنفيذ" : result.decision_reason_code === "critical_data_missing" && result.spot_profile?.shore_type == null ? "نوع الشاطئ غير محدد" : result.decision_reason_code === "stale_forecast_data" || result.decision_reason_code === "forecast_horizon_exceeded" || result.decision_reason_code === "critical_data_missing" ? "منع بسبب جودة البيانات أو أفقها" : "سبب منع آخر"}</strong>
             <p>{result.summary_ar}</p>
           </div>
         </section>
-      )}
-
-      {result.official_warning_check && (
-        <details className={`inm-audit inm-audit-${result.official_warning_check.status}`}>
-          <summary><ShieldAlert size={17} /> فحص INM: {inmStatusLabel[result.official_warning_check.status]}</summary>
-          <p>{result.official_warning_check.explanation_ar}</p>
-          <dl>
-            <div><dt>وقت الفحص</dt><dd>{formatGeneratedAt(result.official_warning_check.checked_at)}</dd></div>
-            <div><dt>عمر استجابة الخادم</dt><dd>{result.official_warning_check.response_age_seconds == null ? "غير معروف" : `${Math.round(result.official_warning_check.response_age_seconds / 60)} دقيقة`}</dd></div>
-            <div><dt>نطاق التغطية</dt><dd>{result.official_warning_check.coverage_ar}</dd></div>
-            <div><dt>سبب الحالة</dt><dd><code>{result.official_warning_check.reason_code}</code></dd></div>
-            {result.official_warning_check.threatened_areas.length > 0 && <div><dt>المناطق المذكورة</dt><dd>{result.official_warning_check.threatened_areas.join("، ")}</dd></div>}
-            {result.official_warning_check.warning_valid_from && <div><dt>بداية صلاحية التحذير</dt><dd>{formatGeneratedAt(result.official_warning_check.warning_valid_from)}</dd></div>}
-            {result.official_warning_check.warning_valid_until && <div><dt>نهاية صلاحية التحذير</dt><dd>{formatGeneratedAt(result.official_warning_check.warning_valid_until)}</dd></div>}
-            {result.official_warning_check.warning_summary_ar.length > 0 && <div><dt>نشرات محللة</dt><dd>{result.official_warning_check.warning_summary_ar.join(" · ")}</dd></div>}
-            {result.official_warning_check.response_sha256 && <div><dt>بصمة الاستجابة</dt><dd><code>{result.official_warning_check.response_sha256.slice(0, 16)}…</code></dd></div>}
-          </dl>
-          <a href={result.official_warning_check.source_url} target="_blank" rel="noreferrer">افتح نشرة INM الرسمية</a>
-        </details>
       )}
 
       <header className={`decision-hero decision-${result.decision}`}>

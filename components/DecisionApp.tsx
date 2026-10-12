@@ -198,11 +198,11 @@ export function DecisionApp() {
         />
       )}
       {result && !("hourly" in result) && (
-        <section className={`decision-preflight-no-go ${result.decision_reason_code === "official_warning_unverified" ? "preflight-inm-unverified" : "preflight-context-missing"}`} id="decision" role="status" aria-live="polite">
-          <div className="decision-preflight-label">{result.decision_reason_code === "official_warning_unverified" ? "لا تذهب · INM غير متحقق" : "لا تذهب · بيانات/سياق ناقص"}</div>
+        <section className="decision-preflight-no-go preflight-context-missing" id="decision" role="status" aria-live="polite">
+          <div className="decision-preflight-label">لا تذهب · بيانات/سياق ناقص</div>
           <h2>{result.summary_ar}</h2>
           <ul>{result.missing_context_ar.map((item) => <li key={item}>{item}</li>)}</ul>
-          <small>{result.decision_reason_code === "official_warning_unverified" ? "لم يثبت التطبيق حداثة نشرة INM ونطاق تغطيتها؛ لذلك لا يصدر GO." : "لم يبدأ تحليل الطقس لأن اتجاه الساحل الموثق غير متوفر، أو لم تكتمل ساعات توقع اليوم الكامل."}</small>
+          <small>{"لم يبدأ تحليل الطقس لأن اتجاه الساحل الموثق غير متوفر، أو لم تكتمل ساعات توقع اليوم الكامل."}</small>
           {result.automated_orientation && (
             <details className="preflight-provenance">
               <summary>الدليل الساحلي الخام المتاح</summary>

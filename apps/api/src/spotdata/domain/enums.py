@@ -107,13 +107,6 @@ class OrientationSource(StrEnum):
     ESTIMATED = "estimated"
 
 
-class InmCheckStatus(StrEnum):
-    VERIFIED_CLEAR = "verified_clear"
-    WARNING_ACTIVE = "warning_active"
-    UNVERIFIED = "unverified"
-    NOT_CHECKED = "not_checked"
-
-
 class DecisionReasonCode(StrEnum):
     SAFE_WINDOW = "safe_window"
     SAFETY_HAZARD = "safety_hazard"
@@ -122,8 +115,6 @@ class DecisionReasonCode(StrEnum):
     CONSERVATIVE_UNCERTAINTY = "conservative_uncertainty"
     FOULING_CONFIRMED = "fouling_confirmed"
     FOULING_PROXY_RISK = "fouling_proxy_risk"
-    OFFICIAL_WARNING = "official_warning"
-    OFFICIAL_WARNING_UNVERIFIED = "official_warning_unverified"
     TRIP_RUIN_CONFIRMED = "trip_ruin_confirmed"
     FORECAST_HORIZON_EXCEEDED = "forecast_horizon_exceeded"
     STALE_FORECAST_DATA = "stale_forecast_data"
@@ -178,8 +169,7 @@ class PotentialLevel(StrEnum):
 class ForceMajeureKind(StrEnum):
     """The single hard blocker behind a NO_GO, or none for a GO.
 
-    Fouling and access_legal are reserved for the evidence ladder (phase 4) and the
-    official INM bulletin (phase 7); the engine cannot emit them yet.
+    Fouling is reserved for the evidence ladder (phase 4); the engine cannot emit it yet.
     """
 
     NONE = "none"

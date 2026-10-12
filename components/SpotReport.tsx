@@ -97,8 +97,6 @@ const decisionReasonLabels = {
   conservative_uncertainty: "تحفظ: لا اجتياز للسلامة أو البيانات غير كافية",
   fouling_confirmed: "رمز قديم غير مستخدم: لا تُستخدم الإفادات الميدانية",
   fouling_proxy_risk: "خطر صوفة محتمل من إشارة ساتلية حديثة ونقل نموذجي؛ ليس تأكيداً ميدانياً",
-  official_warning: "تحذير رسمي ساري",
-  official_warning_unverified: "تعذر التحقق الآلي من تحذير INM",
   forecast_horizon_exceeded: "خارج أفق التوقع التشغيلي 72 ساعة",
   stale_forecast_data: "بيانات توقع قديمة من cache؛ لا تسمح بـ GO",
   trip_ruin_confirmed: "عامل يفسد الخرجة حسب الإشارات المتاحة",

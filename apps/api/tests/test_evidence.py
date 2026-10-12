@@ -101,7 +101,6 @@ def test_manual_evidence_is_ignored_by_decision_engine(
     assert [factor.model_dump() for factor in result.trip_ruin_factors] == [
         factor.model_dump() for factor in baseline_result.trip_ruin_factors
     ]
-    assert any("GO النهائي يتطلب تحققاً آلياً حديثاً" in item for item in result.limitations_ar)
 
 
 def test_spring_neap_is_classified_and_flagged_in_gabes(

@@ -15,7 +15,6 @@ from spotdata.domain.enums import (
     DecisionReasonCode,
     FieldFeasibilityLevel,
     ForceMajeureKind,
-    InmCheckStatus,
     OrientationSource,
     PotentialLevel,
     ShoreType,
@@ -35,7 +34,6 @@ from spotdata.domain.models import (
     GeminiKeyVerificationResponse,
     GeminiReportRequest,
     GeminiReportResponse,
-    InmWarningAudit,
     RankedSpot,
     RankSpotsRequest,
     RankSpotsResponse,
@@ -46,7 +44,6 @@ from spotdata.domain.models import (
 from spotdata.services.coast_orientation import CoastOrientationClient
 from spotdata.services.copernicus_water import CopernicusWaterClient, unavailable_water_context
 from spotdata.services.gemini import GeminiClient, GeminiServiceError
-from spotdata.services.inm_warnings import InmWarningClient
 from spotdata.services.open_meteo import OpenMeteoClient, UpstreamDataError
 
 router = APIRouter()
@@ -63,31 +60,6 @@ GeminiApiKey = Annotated[
         description="Runtime-only Google AI Studio key; never persisted by the API",
     ),
 ]
-
-
-async def _safe_inm_check(
-    request: Request,
-    windows: list[tuple[datetime, datetime]],
-) -> InmWarningAudit:
-    request_id = getattr(request.state, "request_id", None)
-    try:
-        checker: InmWarningClient = request.app.state.inm_warnings
-        return await checker.check(windows, request_id=request_id)
-    except Exception as exc:
-        LOGGER.exception(
-            "INM verification failed closed request_id=%s error_type=%s",
-            request_id,
-            type(exc).__name__,
-        )
-        return InmWarningAudit(
-            status=InmCheckStatus.UNVERIFIED,
-            request_id=request_id,
-            checked_at=datetime.now(UTC),
-            coverage_status="unknown",
-            coverage_ar="تعذر إثبات نطاق التغطية.",
-            reason_code="verifier_internal_error",
-            explanation_ar="تعطل محلل تحقق INM داخلياً؛ بقي القرار NO_GO احترازياً.",
-        )
 
 
 def _missing_automated_spot_context(profile: AutoOrientationResponse) -> list[str]:
@@ -180,10 +152,7 @@ def _preflight_no_go(
     return DecisionPreflightNoGo(
         decision_reason_code=reason_code,
         summary_ar=(
-            "لا تذهب: تعذر التحقق الآلي من حداثة تحذيرات INM ونطاق تغطيتها؛ "
-            "لا يُسمح بإصدار GO حتى ينجح هذا الفحص."
-            if reason_code == DecisionReasonCode.OFFICIAL_WARNING_UNVERIFIED
-            else "لا تذهب: اتجاه الساحل أو بيانات 24 ساعة غير مكتملة؛ لم يصدر المحرك GO."
+            "لا تذهب: اتجاه الساحل أو بيانات 24 ساعة غير مكتملة؛ لم يصدر المحرك GO."
         ),
         missing_context_ar=missing_context_ar,
         automated_orientation=automated_profile,
@@ -240,7 +209,7 @@ async def methodology() -> dict[str, object]:
             "tide and current use model values, not synthetic lunar times",
             "pressure, lunar and solunar claims do not receive automatic catch weights without validation",
             "all decisions include factor provenance, confidence and limitations",
-            "the API fetches forecasts and exposes a request-scoped INM BMS audit; GO requires a fresh uncached official response, explicit clear state, verified national coastal coverage and no conflict; warning, stale data, parser conflict or unavailable source remain NO_GO; manual acknowledgement never substitutes",
+            "the API fetches forecasts and derives GO only from the weather, execution and data-quality gates; no official warning feed is consulted",
             "user-entered field reports, test casts and warning claims are excluded from decisions",
             "fresh METAR values are direct airport-station observations and are never relabelled as spot observations",
             "station/model reconciliation is distance- and age-gated; divergence lowers confidence without spatially copying the station value",
@@ -254,7 +223,6 @@ async def methodology() -> dict[str, object]:
             "AviationWeather.gov METAR direct station observations",
             "OpenStreetMap Overpass coastline geometry",
             "Copernicus Marine public WMTS Sentinel-2 ocean-colour retrievals",
-            "INM Tunisia official BMS marine-warning page (strict fail-closed parser)",
         ],
         "optional_writer": "Google Gemini structured prose with a transient user key",
         "factor_coverage": factor_catalog_summary().model_dump(mode="json"),
@@ -474,13 +442,6 @@ async def forecast_decision(
             update={"coastal_water_context": water_context, "sources": sources}
         )
         decision = engine.evaluate(dataset)
-        inm_audit = await _safe_inm_check(
-            request,
-            [(window.start, window.end) for window in decision.recommended_windows]
-            if decision.decision == DecisionLevel.GO
-            else [],
-        )
-        decision = engine.apply_official_warning_check(dataset, decision, inm_audit)
         return decision.model_copy(
             update={
                 "spot_profile": verified_spot,
@@ -644,23 +605,7 @@ async def rank_spots(payload: RankSpotsRequest, request: Request) -> RankSpotsRe
         for candidate, outcome in zip(verified_candidates, outcomes, strict=True)
     ]
     preliminary = engine.rank_spots(datasets, payload.target_date)
-    candidate_windows = [
-        (item.best_window_start, item.best_window_end)
-        for item in preliminary.ranked
-        if item.decision == DecisionLevel.GO
-        and item.best_window_start is not None
-        and item.best_window_end is not None
-    ]
-    inm_audit = await _safe_inm_check(request, candidate_windows)
-    response = (
-        engine.rank_spots(
-            datasets,
-            payload.target_date,
-            official_warning_check=inm_audit,
-        )
-        if candidate_windows
-        else preliminary.model_copy(update={"official_warning_check": inm_audit})
-    )
+    response = preliminary
     enriched_ranked = [
         item.model_copy(
             update={

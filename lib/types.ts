@@ -1,29 +1,5 @@
 export type DecisionLevel = "go" | "caution" | "no_go" | "unknown";
 export type BinaryDecision = "go" | "no_go";
-export type InmCheckStatus = "verified_clear" | "warning_active" | "unverified" | "not_checked";
-export interface InmWarningAudit {
-  status: InmCheckStatus;
-  request_id: string | null;
-  provider: "INM Tunisia BMS";
-  source_url: string;
-  checked_at: string;
-  http_status_code: number | null;
-  server_date: string | null;
-  response_age_seconds: number | null;
-  cache_control: string | null;
-  age_header_seconds: number | null;
-  response_sha256: string | null;
-  parser_version: string;
-  coverage_status: "verified_tunisian_coasts" | "unknown" | "not_checked";
-  coverage_ar: string;
-  warning_entries_parsed: number;
-  warning_summary_ar: string[];
-  warning_valid_from: string | null;
-  warning_valid_until: string | null;
-  threatened_areas: string[];
-  reason_code: string;
-  explanation_ar: string;
-}
 export type DecisionReasonCode =
   | "safe_window"
   | "safety_hazard"
@@ -32,8 +8,6 @@ export type DecisionReasonCode =
   | "conservative_uncertainty"
   | "fouling_confirmed"
   | "fouling_proxy_risk"
-  | "official_warning"
-  | "official_warning_unverified"
   | "trip_ruin_confirmed"
   | "forecast_horizon_exceeded"
   | "stale_forecast_data";
@@ -638,7 +612,6 @@ export interface RankSpotsResponse {
   target_date: string;
   generated_at: string;
   ranked: RankedSpot[];
-  official_warning_check?: InmWarningAudit | null;
   notes_ar: string[];
 }
 
@@ -674,7 +647,6 @@ export interface DecisionResponse {
   sources: SourceMetadata[];
   current_weather_observation: WeatherStationObservation | null;
   coastal_water_context: CoastalWaterContext | null;
-  official_warning_check?: InmWarningAudit | null;
   cache_fallback_used?: boolean;
   cache_fallback_age_seconds?: number | null;
   spot_profile?: SpotProfile | null;
@@ -690,7 +662,7 @@ export interface DecisionResponse {
 export interface DecisionPreflightNoGo {
   schema_version: "3.20";
   decision: "no_go";
-  decision_reason_code: "critical_data_missing" | "official_warning_unverified";
+  decision_reason_code: "critical_data_missing";
   decision_label_ar: "لا تذهب";
   summary_ar: string;
   missing_context_ar: string[];

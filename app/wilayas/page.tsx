@@ -13,7 +13,6 @@ import { requestRankSpots } from "@/lib/api";
 import {
   fieldFeasibilityLabels,
   formatDate,
-  formatGeneratedAt,
   formatWindowRange,
   potentialLabels,
   springNeapLabel,
@@ -36,8 +35,6 @@ const reasonLabels: Record<string, string> = {
   conservative_uncertainty: "تحفظ: لا اجتياز للسلامة/كفاية البيانات",
   fouling_confirmed: "رمز صوفة قديم غير مستخدم",
   fouling_proxy_risk: "خطر صوفة محتمل",
-  official_warning: "تحذير INM ساري",
-  official_warning_unverified: "تعذر التحقق من INM",
   forecast_horizon_exceeded: "خارج أفق 72 ساعة",
   stale_forecast_data: "بيانات توقع قديمة",
   trip_ruin_confirmed: "عامل يفسد الخرجة",
@@ -189,13 +186,6 @@ export default function WilayasPage() {
             <span>اذهب أولاً · داخلها ترتيب نسبي لا يغيّر القرار</span>
             <small><CalendarDays size={14} /> {formatDate(result.target_date)} · {result.ranked.length} بقعة</small>
           </div>
-          {result.official_warning_check && (
-            <div className={`inm-ranking-audit inm-ranking-${result.official_warning_check.status}`} role="status">
-              <strong>حاجز INM: {result.official_warning_check.status === "verified_clear" ? "تم التحقق — لا تحذير مانع" : result.official_warning_check.status === "warning_active" ? "تحذير رسمي فعّال" : result.official_warning_check.status === "not_checked" ? "لم يلزم الفحص بسبب NO_GO سابق" : "تعذر التحقق؛ لا GO"}</strong>
-              <span>{result.official_warning_check.explanation_ar}</span>
-              <small>{formatGeneratedAt(result.official_warning_check.checked_at)} · {result.official_warning_check.reason_code}</small>
-            </div>
-          )}
           <ol className="wilaya-ranking">
             {result.ranked.map((spot, index) => (
               <RankCard key={spot.spot_id} spot={spot} rank={index + 1} />

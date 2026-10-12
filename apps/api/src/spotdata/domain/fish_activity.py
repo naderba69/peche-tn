@@ -7,15 +7,17 @@ Never used: surf-zone current (model ~8 km), tea-visibility in metres,
 stomach, blitz, oxygen. Turbidity potential is a blocker channel, not a
 visibility metre — it does not enter this rank.
 
-Output is 0–100 relative rank for open hours, or null when coverage is too
+Output is 0-100 relative rank for open hours, or null when coverage is too
 thin. Never a catch probability and never GO/NO_GO.
 """
 
 from __future__ import annotations
 
+from collections.abc import Sequence
+
 from .enums import TargetSpecies, TideState
 from .math import in_gabes_zone, tunisian_zone
-from .models import ForecastDataset, SpeciesForecast
+from .models import ForecastDataset, HourDecision, SpeciesForecast
 from .species import BAIT_BY_SPECIES, SPECIES_PROFILES
 
 FORECAST_SPECIES = (
@@ -112,14 +114,18 @@ def _mean(values: list[float | None]) -> float | None:
 
 
 def _shock(dataset: ForecastDataset) -> bool:
-    series = [h.sea_surface_temperature_c for h in dataset.hours if h.sea_surface_temperature_c is not None]
+    series = [
+        h.sea_surface_temperature_c
+        for h in dataset.hours
+        if h.sea_surface_temperature_c is not None
+    ]
     if len(series) < 8:
         return False
     window = series[:48]
     return max(window) - min(window) >= SHOCK_DROP_C and window[-1] <= window[0] - 2.0
 
 
-def _after_storm(dataset: ForecastDataset, open_hours) -> bool:
+def _after_storm(dataset: ForecastDataset, open_hours: Sequence[HourDecision]) -> bool:
     past = any(h.wave_height_m is not None and h.wave_height_m >= HS_STORM_M for h in dataset.hours)
     if not past or not open_hours:
         return False
@@ -127,7 +133,7 @@ def _after_storm(dataset: ForecastDataset, open_hours) -> bool:
     return now is not None and HS_FEED_MIN_M <= now <= HS_FEED_MAX_M
 
 
-def feeding_mode_ar(species: TargetSpecies, open_hours, gabes: bool) -> str:
+def feeding_mode_ar(species: TargetSpecies, open_hours: Sequence[HourDecision], gabes: bool) -> str:
     wave = _mean([h.forecast.wave_height_m for h in open_hours])
     rising = gabes and any(h.derived.tide_state == TideState.RISING for h in open_hours)
     twilight = any(h.derived.is_twilight for h in open_hours)
@@ -154,7 +160,11 @@ def _reliability_ar(coverage: float) -> str:
     return "تغطية كافية للترتيب لا للدقة الإحصائية"
 
 
-def score_species(species: TargetSpecies, open_hours, dataset: ForecastDataset) -> tuple[int | None, list[str], int, str]:
+def score_species(
+    species: TargetSpecies,
+    open_hours: Sequence[HourDecision],
+    dataset: ForecastDataset,
+) -> tuple[int | None, list[str], int, str]:
     """Return (score or None, drivers, coverage_pct, reliability_ar)."""
     sst = _mean([h.forecast.sea_surface_temperature_c for h in open_hours])
     wave = _mean([h.forecast.wave_height_m for h in open_hours])
@@ -171,7 +181,7 @@ def score_species(species: TargetSpecies, open_hours, dataset: ForecastDataset) 
         if _shock(dataset):
             mu *= 0.5
             drivers.append(f"صدمة حرارية ΔT>{SHOCK_DROP_C:.0f}°")
-        measured.append((mu, w["temp"], f"حرارة {sst:.1f}°م ذروة {b:.0f}–{c:.0f}"))
+        measured.append((mu, w["temp"], f"حرارة {sst:.1f}°م ذروة {b:.0f}-{c:.0f}"))
     else:
         hole += w["temp"]
 
@@ -182,7 +192,14 @@ def score_species(species: TargetSpecies, open_hours, dataset: ForecastDataset) 
     chop = wind is not None and CHOP_WIND_MIN_KMH <= wind <= CHOP_WIND_MAX_KMH
     month = dataset.target_date.month
     summer_hot = sst is not None and sst >= 26.0 and month in {7, 8}
-    dusk = sum(1 for h in open_hours if h.time.hour >= 18 or (h.derived.is_twilight and h.time.hour >= 12)) / n
+    dusk = (
+        sum(
+            1
+            for h in open_hours
+            if h.time.hour >= 18 or (h.derived.is_twilight and h.time.hour >= 12)
+        )
+        / n
+    )
     dawn = sum(1 for h in open_hours if 4 <= h.time.hour < 8) / n
     if species == TargetSpecies.EUROPEAN_SEABASS:
         mu_l = 0.35 * day + 1.0 * twilight + 0.75 * night
@@ -224,7 +241,7 @@ def score_species(species: TargetSpecies, open_hours, dataset: ForecastDataset) 
         hole += w["season"]
 
     coverage = 1.0 - hole
-    coverage_pct = int(round(100.0 * max(0.0, min(1.0, coverage))))
+    coverage_pct = round(100.0 * max(0.0, min(1.0, coverage)))
     reliability = _reliability_ar(coverage)
     if coverage < MIN_COVERAGE or not measured:
         return None, ["تغطية الحقول المقيسة دون العتبة — لا رقم"], coverage_pct, reliability
@@ -238,20 +255,22 @@ def score_species(species: TargetSpecies, open_hours, dataset: ForecastDataset) 
     if species == TargetSpecies.EUROPEAN_SEABASS and wave is not None:
         if HS_FEED_MIN_M <= wave <= HS_FEED_MAX_M:
             activity *= 1.3
-            drivers.append(f"Hs {wave:.2f} م داخل 0.5–1.2")
+            drivers.append(f"Hs {wave:.2f} م داخل 0.5-1.2")
         elif wave >= HS_STORM_M:
             activity *= 0.55
             drivers.append(f"Hs {wave:.2f} م فوق 1.5")
 
     if species == TargetSpecies.EUROPEAN_SEABASS and _after_storm(dataset, open_hours):
         activity *= AFTER_STORM_MULT
-        drivers.append("بعد هياج ≥1.5 م ثم 0.5–1.2 م ×1.5")
+        drivers.append("بعد هياج ≥1.5 م ثم 0.5-1.2 م x1.5")
 
-    score = int(round(100.0 * min(1.0, activity)))
+    score = round(100.0 * min(1.0, activity))
     return max(0, min(100, score)), drivers[:6], coverage_pct, reliability
 
 
-def build_forecasts(dataset: ForecastDataset, open_hours) -> tuple[str, list[SpeciesForecast]]:
+def build_forecasts(
+    dataset: ForecastDataset, open_hours: Sequence[HourDecision]
+) -> tuple[str, list[SpeciesForecast]]:
     if not open_hours:
         empty = [
             SpeciesForecast(

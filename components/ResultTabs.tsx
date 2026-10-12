@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useId, useRef, useState } from "react";
+import { useId, useRef, useState } from "react";
 
 export interface ResultTab {
   id: string;
@@ -32,9 +32,13 @@ export function ResultTabs({
   const baseId = useId();
   const refs = useRef<Record<string, HTMLButtonElement | null>>({});
 
-  useEffect(() => {
-    if (focusTabId) setActive(focusTabId);
-  }, [focusTabId, focusNonce]);
+  // Sync an external focus request into state during render (React's recommended
+  // pattern) instead of calling setState inside an effect.
+  const [seenFocus, setSeenFocus] = useState<{ id?: string; nonce?: number }>({});
+  if (focusTabId && (focusTabId !== seenFocus.id || focusNonce !== seenFocus.nonce)) {
+    setSeenFocus({ id: focusTabId, nonce: focusNonce });
+    setActive(focusTabId);
+  }
 
   const focusTab = (id: string) => {
     setActive(id);

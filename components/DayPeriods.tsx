@@ -1,7 +1,6 @@
 "use client";
 
 import { Clock3, Droplets, Waves, Wind } from "lucide-react";
-import { decisionShortLabels } from "@/lib/format";
 import type { PeriodSummary } from "@/lib/periods";
 
 export function DayPeriods({ periods }: { periods: PeriodSummary[] }) {

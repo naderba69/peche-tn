@@ -316,7 +316,10 @@ def test_morning_blockers_do_not_veto_clear_evening(
     assert result.avoid_windows
     assert any(window.safety == DecisionLevel.NO_GO for window in result.avoid_windows)
     assert result.recommended_windows
-    assert all(window.end <= result.avoid_windows[0].start or window.start >= result.avoid_windows[0].end for window in result.recommended_windows)
+    assert all(
+        window.end <= result.avoid_windows[0].start or window.start >= result.avoid_windows[0].end
+        for window in result.recommended_windows
+    )
 
 
 def test_localized_thunder_is_avoided_while_high_turbidity_proxy_stays_caution_only(
@@ -1084,7 +1087,9 @@ def test_east_short_period_chop_raises_holding_unlike_north(
     north_data = dataset_factory(hour_updates=chop)
     east_data = dataset_factory(hour_updates=chop).model_copy(
         update={
-            "location": north_data.location.model_copy(update={"latitude": 35.7, "longitude": 10.9}),
+            "location": north_data.location.model_copy(
+                update={"latitude": 35.7, "longitude": 10.9}
+            ),
         }
     )
     north = engine.evaluate(north_data)

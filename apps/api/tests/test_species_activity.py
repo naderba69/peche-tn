@@ -328,4 +328,6 @@ def test_full_moon_day_adds_the_traditional_lunar_prior(
     )
     result = engine.evaluate(dataset)
     assert _score_at(result, "صيد عام", 12) == 50
-    assert any("سولونار" in line or "القاروص" in line for line in _species(result, "صيد عام").basis_ar)
+    assert any(
+        "سولونار" in line or "القاروص" in line for line in _species(result, "صيد عام").basis_ar
+    )

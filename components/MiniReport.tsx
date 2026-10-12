@@ -5,7 +5,6 @@ import {
   Anchor,
   CalendarClock,
   CircleAlert,
-  Fish,
   Info,
   TriangleAlert,
   Waves,

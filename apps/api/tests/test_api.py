@@ -38,8 +38,7 @@ def test_health_and_methodology() -> None:
         assert any("METAR" in item for item in method.json()["free_data_providers"])
         assert any("Sentinel-2" in item for item in method.json()["free_data_providers"])
         assert any(
-            "no official warning feed is consulted" in item
-            for item in method.json()["principles"]
+            "no official warning feed is consulted" in item for item in method.json()["principles"]
         )
         catalog = client.get("/api/methodology/factors")
         assert catalog.status_code == 200

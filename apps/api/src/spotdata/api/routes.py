@@ -151,9 +151,7 @@ def _preflight_no_go(
         )
     return DecisionPreflightNoGo(
         decision_reason_code=reason_code,
-        summary_ar=(
-            "لا تذهب: اتجاه الساحل أو بيانات 24 ساعة غير مكتملة؛ لم يصدر المحرك GO."
-        ),
+        summary_ar=("لا تذهب: اتجاه الساحل أو بيانات 24 ساعة غير مكتملة؛ لم يصدر المحرك GO."),
         missing_context_ar=missing_context_ar,
         automated_orientation=automated_profile,
         sources=sources,

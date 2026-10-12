@@ -19,7 +19,8 @@ from __future__ import annotations
 import math
 import statistics
 from collections import Counter
-from datetime import datetime
+from collections.abc import Sequence
+from datetime import datetime, tzinfo
 from typing import TypeVar
 
 from .enums import DecisionLevel, PotentialLevel, WindRelation
@@ -31,6 +32,7 @@ from .models import (
     DecisionResponse,
     FishermanReport,
     ForecastDataset,
+    HourDecision,
     ReportPeriod,
     SpeciesPeriodScore,
 )
@@ -97,23 +99,26 @@ def _hm(value: datetime | None) -> str | None:
     return None if value is None else value.strftime("%H:%M")
 
 
-def _hour_blocked(item) -> bool:
+def _hour_blocked(item: HourDecision) -> bool:
     if item.safety in {DecisionLevel.NO_GO, DecisionLevel.UNKNOWN}:
         return True
     field = item.field_feasibility
-    return field.holding_difficulty == PotentialLevel.HIGH or field.turbidity_potential == PotentialLevel.HIGH
+    return (
+        field.holding_difficulty == PotentialLevel.HIGH
+        or field.turbidity_potential == PotentialLevel.HIGH
+    )
 
 
-def _open_range_ar(open_hours, tz) -> str | None:
+def _open_range_ar(open_hours: Sequence[HourDecision], tz: tzinfo) -> str | None:
     if not open_hours:
         return None
     start = open_hours[0].time.astimezone(tz)
     last = open_hours[-1].time.astimezone(tz)
     end_hour = (last.hour + 1) % 24
-    return f"{start:%H:%M}–{end_hour:02d}:00"
+    return f"{start:%H:%M}-{end_hour:02d}:00"
 
 
-def _activity_from_open(open_hours) -> tuple[int | None, str]:
+def _activity_from_open(open_hours: Sequence[HourDecision]) -> tuple[int | None, str]:
     if not open_hours:
         return None, "لا يُعرض نشاط سمك: الفترة ممنوعة بالموانع المحسوبة."
     score = round(sum(item.opportunity_score for item in open_hours) / len(open_hours))
@@ -138,7 +143,7 @@ def _activity_from_open(open_hours) -> tuple[int | None, str]:
     return score, " ".join(bits)
 
 
-def _gabes_tide_ar(dataset: ForecastDataset, open_hours) -> str | None:
+def _gabes_tide_ar(dataset: ForecastDataset, open_hours: Sequence[HourDecision]) -> str | None:
     if not in_gabes_zone(dataset.location.latitude, dataset.location.longitude):
         return None
     if not open_hours:
@@ -245,7 +250,7 @@ def _montage_ar(state: str, wind_kmh: float | None) -> str:
     return "مونتاج بسنود طويل (فرع سفلي ~150سم، خفيف) — حركة طبيعية للطعم في الماء الهادئ."
 
 
-def _turbidity_ar(hours, fnu: float | None) -> str:
+def _turbidity_ar(hours: Sequence[HourDecision], fnu: float | None) -> str:
     levels = [item.field_feasibility.turbidity_potential for item in hours]
     if any(level == PotentialLevel.HIGH for level in levels):
         return "مانع عكارة محسوب (HIGH) — يمنع الساعات؛ ليس قراءة NTU."

@@ -44,7 +44,6 @@ from .math import (
     dominant_wind_direction_deg,
     gust_factor,
     in_gabes_zone,
-    tunisian_regime,
     incoming_direction_components,
     incoming_direction_signed_components,
     kmh_to_mps,
@@ -59,6 +58,7 @@ from .math import (
     solar_elevation_deg,
     solar_twilight_times,
     tide_states,
+    tunisian_regime,
     tunisian_zone,
     wave_energy_proxy,
     weighted_directional_coherence,
@@ -351,7 +351,7 @@ def _species_hour_activity(
         )
     del lunar_day_delta  # folk calendar excluded from the score
     del moon_illumination, target_species  # moonlight is astronomy, not feeding
-    # Pressure tendency is weather context only (catalog 1.8–1.10): never a catch weight.
+    # Pressure tendency is weather context only (catalog 1.8-1.10): never a catch weight.
     return max(0, min(100, score)), contributions
 
 
@@ -457,7 +457,9 @@ def _activity_basis_ar(profile: SpeciesProfile) -> list[str]:
         "مؤشر نشاط نسبي (0-100) يبدأ من 50: نافذة تغذية فلكية، حرارة الماء، توفر موسمي من دراسات (ليس ذروة تبييض)، توافق القاع، حالة بحر مناسبة للنوع. الضغط والقمر الشعبي خارج التنقيط. في خليج قابس فقط يُحتسب طور المد الساعي.",
     ]
     if profile.label_ar == "صيد عام":
-        lines.append("صيد عام بلا ملف موسمي أو حراري أو قاع: تعديل نشاط الشفق/الليل فقط، لا يغيّر اذهب/لا تذهب.")
+        lines.append(
+            "صيد عام بلا ملف موسمي أو حراري أو قاع: تعديل نشاط الشفق/الليل فقط، لا يغيّر اذهب/لا تذهب."
+        )
     lines.append(
         "ترتيب نسبي وليس احتمالاً ولا وعداً بالمصيد. المعايرة تحتاج سجل حصص تونسي يشمل الأصفار."
     )
@@ -2800,14 +2802,14 @@ class DecisionEngine:
                 ):
                     return DecisionLevel.NO_GO, DecisionReasonCode.STALE_FORECAST_DATA
                 return DecisionLevel.NO_GO, DecisionReasonCode.CRITICAL_DATA_MISSING
+            if any(item.safety == DecisionLevel.NO_GO for item in hourly):
+                return DecisionLevel.NO_GO, DecisionReasonCode.SAFETY_HAZARD
             if any(
                 item.field_feasibility.holding_difficulty == PotentialLevel.HIGH
                 or item.field_feasibility.turbidity_potential == PotentialLevel.HIGH
                 for item in hourly
             ):
                 return DecisionLevel.NO_GO, DecisionReasonCode.FIELD_INFEASIBLE
-            if any(item.safety == DecisionLevel.NO_GO for item in hourly):
-                return DecisionLevel.NO_GO, DecisionReasonCode.SAFETY_HAZARD
             return DecisionLevel.NO_GO, DecisionReasonCode.CONSERVATIVE_UNCERTAINTY
 
         # The product has one binary headline. A caution-only set of windows is not
@@ -2828,10 +2830,10 @@ class DecisionEngine:
             return DecisionLevel.NO_GO, DecisionReasonCode.FIELD_INFEASIBLE
         if field_feasibility.turbidity_potential == PotentialLevel.HIGH:
             return DecisionLevel.NO_GO, DecisionReasonCode.FIELD_INFEASIBLE
-        if field_feasibility.status == FieldFeasibilityLevel.DIFFICULT and (
-            field_feasibility.rip_current_potential == PotentialLevel.HIGH
-            or field_feasibility.holding_difficulty == PotentialLevel.HIGH
-            or field_feasibility.turbidity_potential == PotentialLevel.HIGH
+        # Holding and turbidity HIGH already returned above, so only rip current remains.
+        if (
+            field_feasibility.status == FieldFeasibilityLevel.DIFFICULT
+            and field_feasibility.rip_current_potential == PotentialLevel.HIGH
         ):
             return DecisionLevel.NO_GO, DecisionReasonCode.FIELD_INFEASIBLE
         if confidence.score < 50:
@@ -2958,9 +2960,11 @@ class DecisionEngine:
                 notes.append(
                     f"إشارة CHL-a بعمر {age_hours:.0f} ساعة تجاوزت حد الحداثة {_CHL_FORCE_MAJEURE_MAX_AGE_HOURS:.0f} ساعة؛ لا تدخل سلم المنع."
                 )
-            elif chl is not None and chl >= _chl_bloom_thresholds(
-                dataset.location.latitude, dataset.location.longitude
-            )[1]:
+            elif (
+                chl is not None
+                and chl
+                >= _chl_bloom_thresholds(dataset.location.latitude, dataset.location.longitude)[1]
+            ):
                 if fouling == PotentialLevel.HIGH:
                     level = max(level, 4)
                     satellite_proxy_force_majeure = True
@@ -2972,9 +2976,11 @@ class DecisionEngine:
                     basis.append(
                         f"إشارة CHL-a مرتفعة حديثة ({chl:.1f} mg/m³) لكن بروكسي النقل غير مرتفع؛ يلزم تحقق ميداني."
                     )
-            elif chl is not None and chl >= _chl_bloom_thresholds(
-                dataset.location.latitude, dataset.location.longitude
-            )[0]:
+            elif (
+                chl is not None
+                and chl
+                >= _chl_bloom_thresholds(dataset.location.latitude, dataset.location.longitude)[0]
+            ):
                 level = max(level, 3)
                 basis.append(
                     f"إشارة CHL-a حديثة متوسطة ({chl:.1f} mg/m³)؛ تنبيه غير مؤكد لا دليل قاهر."
@@ -3853,7 +3859,7 @@ class DecisionEngine:
                 entries.append((activity, contributions))
             basis = [
                 *_activity_basis_ar(profile),
-                f"المد: {spring_neap.folk_label_ar} — خارج قابس بلا وزن؛ في قابس المد الصاعد +3 والجزر −3 ساعياً.",
+                f"المد: {spring_neap.folk_label_ar} — خارج قابس بلا وزن؛ في قابس المد الصاعد +3 والجزر -3 ساعياً.",
                 f"إضاءة القمر {illumination:.0%} — تُحتسب ليلاً للقاروص فقط (+2)، لا قاعدة سولونار.",
             ]
             activities.append(

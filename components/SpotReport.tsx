@@ -17,7 +17,6 @@ import {
   MessageCircle,
   Printer,
   ShieldCheck,
-  Sparkles,
   Sunrise,
   Sunset,
   Waves,

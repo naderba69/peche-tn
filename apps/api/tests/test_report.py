@@ -88,7 +88,9 @@ def test_fish_forecast_is_relative_and_listed(dataset_factory) -> None:
     report = engine.evaluate(dataset).fisherman_report
     assert report is not None
     assert report.fish_forecasts
-    assert "احتمال" not in report.fish_forecast_note_ar or "ليس احتمال" in report.fish_forecast_note_ar
+    assert (
+        "احتمال" not in report.fish_forecast_note_ar or "ليس احتمال" in report.fish_forecast_note_ar
+    )
     assert "ممنوعة" in report.fish_forecast_note_ar
     labels = {row.label_ar for row in report.fish_forecasts}
     assert {"القاروص", "الوراطة", "السار", "المرمار"} <= labels

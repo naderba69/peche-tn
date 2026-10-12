@@ -35,7 +35,7 @@ DEFAULT_SERVERS = (
 VERIFIED_MAX_COAST_M = 500.0
 ANGLE_TOLERANCE_DEG = 5.0
 MIN_COMPARABLE = int(os.getenv("PECHE_TN_LIVE_MIN_COMPARABLE", "10"))
-FETCH_ROUNDS = 3
+FETCH_ROUNDS = 2
 REFERENCE_RADIUS_M = 3000
 REPO_ROOT = Path(__file__).resolve().parents[3]
 
@@ -57,7 +57,7 @@ async def fetch_coastline_ways(client: httpx.AsyncClient, lat: float, lon: float
     query = f'[out:json][timeout:25];way(around:{REFERENCE_RADIUS_M},{lat},{lon})["natural"="coastline"];out geom;'
     for server in servers():
         try:
-            response = await client.post(server, data={"data": query}, timeout=40)
+            response = await client.post(server, data={"data": query}, timeout=20)
             response.raise_for_status()
             return [e for e in response.json().get("elements", []) if e.get("type") == "way"]
         except (httpx.HTTPError, ValueError):
@@ -72,7 +72,7 @@ async def fetch_with_retries(client: httpx.AsyncClient, lat: float, lon: float) 
             return await fetch_coastline_ways(client, lat, lon)
         except RuntimeError as error:
             last_error = error
-            await asyncio.sleep(10 * (attempt + 1))
+            await asyncio.sleep(5 * (attempt + 1))
     assert last_error is not None
     raise last_error
 

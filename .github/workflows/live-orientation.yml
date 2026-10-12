@@ -10,6 +10,10 @@ on:
   schedule:
     - cron: "0 6 * * 1"
 
+concurrency:
+  group: live-orientation-${{ github.ref }}
+  cancel-in-progress: true
+
 permissions:
   contents: read
 

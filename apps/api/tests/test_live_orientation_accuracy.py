@@ -13,6 +13,7 @@ itself uses to call an orientation verified.
 from __future__ import annotations
 
 import asyncio
+import itertools
 import math
 import os
 import re
@@ -70,7 +71,7 @@ def reference_seaward_bearing(ways: list[dict], lat: float, lon: float) -> tuple
     best_point = (lat, lon)
     for way in ways:
         geometry = way.get("geometry") or []
-        for a, b in zip(geometry, geometry[1:]):
+        for a, b in itertools.pairwise(geometry):
             ax, ay = (a["lon"] - lon) * kx, (a["lat"] - lat) * ky
             bx, by = (b["lon"] - lon) * kx, (b["lat"] - lat) * ky
             dx, dy = bx - ax, by - ay
@@ -132,8 +133,12 @@ def test_api_orientation_matches_osm_coastline_geometry() -> None:
         )
 
     comparable = [row for row in rows if row["error_deg"] is not None]
-    print(f"comparable (resolved and coast <= {VERIFIED_MAX_COAST_M:.0f} m): {len(comparable)}/{len(rows)}")
+    print(
+        f"comparable (resolved and coast <= {VERIFIED_MAX_COAST_M:.0f} m): {len(comparable)}/{len(rows)}"
+    )
 
     assert comparable, "no preset produced a verified orientation to compare against OSM"
     worst = max(row["error_deg"] for row in comparable)
-    assert worst <= ANGLE_TOLERANCE_DEG, f"worst orientation error {worst}° exceeds {ANGLE_TOLERANCE_DEG}°"
+    assert worst <= ANGLE_TOLERANCE_DEG, (
+        f"worst orientation error {worst}° exceeds {ANGLE_TOLERANCE_DEG}°"
+    )

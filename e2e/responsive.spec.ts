@@ -13,6 +13,29 @@ const viewports = [
   { name: "wide-desktop", width: 1440, height: 900 },
 ];
 
+// The analyze button stays blocked (محجوب) until the real coastline lookup verifies the orientation.
+// Verification depends on live OpenStreetMap data, so tests step through the real preset spots and
+// analyze the first one the API verifies. If none verifies, the test fails with that explanation.
+async function analyzeFirstVerifiedSpot(page: Page) {
+  const presets = page.locator(".quick-spots .spot-chip");
+  const total = await presets.count();
+  for (let index = 0; index < total; index += 1) {
+    const [response] = await Promise.all([
+      page.waitForResponse((res) => res.url().includes("/api/v1/spots/orientation")),
+      presets.nth(index).click(),
+    ]);
+    expect(response.status()).toBe(200);
+    const analyze = page.getByRole("button", { name: /^(حلّل 24 ساعة|محجوب)/ });
+    await expect(analyze).toBeVisible();
+    const verified = page.getByRole("button", { name: "حلّل 24 ساعة" });
+    if (await verified.count()) {
+      await verified.click();
+      return;
+    }
+  }
+  throw new Error("no coastal preset produced a verified orientation from live data");
+}
+
 async function expectNoPageOverflow(page: Page) {
   const dimensions = await page.evaluate(() => ({
     viewport: window.innerWidth,
@@ -36,11 +59,9 @@ for (const viewport of viewports) {
     await page.locator("#planner").scrollIntoViewIfNeeded();
     await expect(page.getByRole("heading", { name: "وقتاش الحصة؟" })).toBeVisible();
     await expect(page.getByRole("heading", { name: "اتجاه الشاطئ" })).toBeVisible();
-    const submit = page.getByRole("button", { name: "حلّل 24 ساعة" });
-    await expect(submit).toBeVisible();
     await expectNoPageOverflow(page);
 
-    await submit.click();
+    await analyzeFirstVerifiedSpot(page);
     await expect(page.getByRole("heading", { name: DECISION_HEADING })).toBeVisible();
 
     // القرار والبطاقة الميدانية ظاهران فوراً بلا فتح أي تبويب.
@@ -74,7 +95,7 @@ test("mobile result stays readable, interactive, and marks stale choices", async
   await page.goto("/");
   await expect(page.getByRole("heading", { name: "إعداد تقرير السيرفكاست" })).toBeVisible();
   await page.locator("#planner").scrollIntoViewIfNeeded();
-  await page.getByRole("button", { name: "حلّل 24 ساعة" }).click();
+  await analyzeFirstVerifiedSpot(page);
 
   await expect(page.getByRole("heading", { name: DECISION_HEADING })).toBeVisible();
   await expect(page.getByRole("heading", { name: "القرار ساعة بساعة" })).toBeVisible();
@@ -106,7 +127,7 @@ test("mobile result stays readable, interactive, and marks stale choices", async
 test("the result answers in a couple of screens and tabs stay keyboard reachable", async ({ page }) => {
   await page.setViewportSize({ width: 390, height: 844 });
   await page.goto("/");
-  await page.getByRole("button", { name: "حلّل 24 ساعة" }).click();
+  await analyzeFirstVerifiedSpot(page);
   await expect(page.getByRole("heading", { name: DECISION_HEADING })).toBeVisible();
 
   // انحدار التكدس: كانت النتيجة ‎15.8 شاشة مفتوحة دفعة واحدة على الهاتف.
@@ -140,7 +161,7 @@ test("the full spot report is scientific, complete, downloadable, and mobile-saf
   await context.grantPermissions(["clipboard-read", "clipboard-write"]);
   await page.setViewportSize({ width: 320, height: 568 });
   await page.goto("/");
-  await page.getByRole("button", { name: "حلّل 24 ساعة" }).click();
+  await analyzeFirstVerifiedSpot(page);
   await expect(page.getByRole("heading", { name: DECISION_HEADING })).toBeVisible();
   await page.locator("#spot-report-trigger").click();
   const report = page.locator("#spot-report");
@@ -218,7 +239,7 @@ test("loading feedback appears while the forecast is being prepared", async ({ p
   await page.goto("/");
   await expect(page.getByRole("heading", { name: "إعداد تقرير السيرفكاست" })).toBeVisible();
   await page.locator("#planner").scrollIntoViewIfNeeded();
-  await page.getByRole("button", { name: "حلّل 24 ساعة" }).click();
+  await analyzeFirstVerifiedSpot(page);
 
   await expect(page.getByRole("status").filter({ hasText: "نحضّر قرار الحصة" })).toBeVisible();
   await expect(page.getByRole("heading", { name: DECISION_HEADING })).toBeVisible();
@@ -250,7 +271,7 @@ test("network errors are explained without breaking the planner", async ({ page 
   await page.goto("/");
   await expect(page.getByRole("heading", { name: "إعداد تقرير السيرفكاست" })).toBeVisible();
   await page.locator("#planner").scrollIntoViewIfNeeded();
-  await page.getByRole("button", { name: "حلّل 24 ساعة" }).click();
+  await analyzeFirstVerifiedSpot(page);
 
   const error = page.locator("#planner-error");
   await expect(error).toContainText("ما قدرناش نكمّلوا التحليل");
@@ -314,7 +335,7 @@ test("a field mismatch visibly overrides reliance on the forecast", async ({ pag
   await page.setViewportSize({ width: 375, height: 667 });
   await page.goto("/");
   await expect(page.getByRole("heading", { name: "إعداد تقرير السيرفكاست" })).toBeVisible();
-  await page.getByRole("button", { name: "حلّل 24 ساعة" }).click();
+  await analyzeFirstVerifiedSpot(page);
   await expect(page.getByRole("heading", { name: DECISION_HEADING })).toBeVisible();
 
   const trigger = page.getByRole("button", { name: "الواقع مختلف؟" });
@@ -550,7 +571,7 @@ test("Gemini key stays local, generation is explicit, and deterministic fallback
   });
 
   await page.goto("/");
-  await page.getByRole("button", { name: "حلّل 24 ساعة" }).click();
+  await analyzeFirstVerifiedSpot(page);
   await expect(page.getByRole("heading", { name: DECISION_HEADING })).toBeVisible();
 
   // التقرير الكامل نسخة علمية حتمية — لا يحتوي Gemini.

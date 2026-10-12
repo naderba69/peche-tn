@@ -4,6 +4,8 @@ name: live-orientation
 # push/PR CI because Overpass availability is outside this repository's control.
 
 on:
+  push:
+    branches: [arena/f9a95189-peche-tn]
   workflow_dispatch:
   schedule:
     - cron: "0 6 * * 1"

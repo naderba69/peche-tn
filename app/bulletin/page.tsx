@@ -46,18 +46,19 @@ export default function BulletinPage() {
         <div className="eyebrow"><ShieldAlert size={15} /> النشرة الرسمية INM (D14)</div>
         <h1>النشرة الرسمية<br /><em>تحقّق منها بنفسك.</em></h1>
         <p>
-          نشرة المعهد الوطني للرصد الجوي هي المرجع الرسمي للتحذيرات. Peche TN لا يجلبها أو
-          يفحص صلاحيتها ونطاقها تلقائياً، ولذلك لا يضمّنها في القرار الآلي.
+          نشرة المعهد الوطني للرصد الجوي هي المرجع الرسمي. التطبيق يحاول قراءة صفحة التحذير
+          (BMS) قبل السماح بـ«اذهب»: إن وُجد تحذير يغطي الوقت أو تعذر التأكد، القرار لا تذهب.
+          هذا لا يغني عن فتح النشرة بعينك.
         </p>
       </section>
 
       <section className="bulletin-banner" role="alert">
         <AlertTriangle size={20} />
         <div>
-          <strong>التحذيرات الرسمية غير مدمجة في القرار.</strong>
+          <strong>افتح النشرة الرسمية دائماً.</strong>
           <span>
-            افتح النشرة مباشرةً قبل الخروج. ظهور «اذهب» في Peche TN لا يعني أن التطبيق فحص
-            تحذيرات INM أو أكد خلو منطقتك منها.
+            التطبيق يفحص صفحة BMS آلياً كحاجز: فشل الفحص = لا تذهب. «اذهب» يعني أن الحاجز الآلي
+            مرّ، لا أنك معفي من قراءة النشرة والمنطقة والتوقيت بنفسك.
           </span>
         </div>
       </section>
@@ -94,7 +95,7 @@ export default function BulletinPage() {
         </ol>
         <p className="bulletin-note">
           <ArrowLeft size={15} />
-          <span>مصادر التحذيرات الرسمية لا تُجلب آلياً حالياً؛ هذا الدليل يوفّر روابط مباشرة فقط.</span>
+          <span>الروابط للنشرة الكاملة حسب المنطقة. الحاجز الآلي يقرأ صفحة BMS؛ عينك على النشرة الساحلية تبقى واجبة.</span>
         </p>
       </section>
 
@@ -102,7 +103,7 @@ export default function BulletinPage() {
         <Link className="brand footer-brand" href="/"><span className="brand-mark"><Waves size={20} /></span><strong>Peche TN</strong></Link>
         <p>أداة تونسية مجانية لدعم قرار سيرفكاست أكثر أماناً ووضوحاً.</p>
         <div className="footer-meta">
-          <span>الإصدار 1.16.0 · المعطيات البحرية تقريبية وقد تختلف محلياً.</span>
+          <span>التطبيق 1.16.0 · محرك القرار 1.11.7</span>
           <Link href="/">الرئيسية</Link>
         </div>
       </footer>

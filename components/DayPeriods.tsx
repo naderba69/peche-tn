@@ -9,9 +9,15 @@ export function DayPeriods({ periods }: { periods: PeriodSummary[] }) {
     <div className="report-period-grid">
       {periods.map((period) => (
         <article className={!period.hours.length ? "unavailable" : ""} key={period.id}>
-          <header><span><Clock3 size={16} /><strong>{period.label}</strong><small>{period.range}</small></span>{period.safety && <b className={`report-safety-${period.safety}`}>سلامة: {decisionShortLabels[period.safety]}</b>}</header>
+          <header><span><Clock3 size={16} /><strong>{period.label}</strong><small>{period.range}</small></span>
+            <b className={`report-safety-${period.gate === "blocked" ? "no_go" : period.gate === "mixed" ? "caution" : period.gate === "open" ? "go" : "unknown"}`}>
+              {period.gate === "blocked" ? "ممنوعة" : period.gate === "mixed" ? "فيها ساعات بلا موانع" : period.gate === "open" ? "بلا موانع" : "لا بيانات"}
+            </b>
+          </header>
           {period.hours.length ? <>
-            <div className="period-scores"><span>أدنى مؤشر تنفيذ <strong>{period.field}/100</strong></span><span>متوسط الفرصة <strong>{period.opportunity}/100</strong></span><span>أضعف دعم بيانات <strong>{period.confidence}/100</strong></span></div>
+            {period.openRange ? <p>ساعات بلا موانع: {period.openRange}</p> : null}
+            <div className="period-scores"><span>أدنى تنفيذ <strong>{period.field}/100</strong></span><span>{period.gate === "blocked" ? "لا ترتيب في فترة ممنوعة" : <>نشاط نسبي <strong>{period.opportunity}/100</strong></>}</span><span>أضعف بيانات <strong>{period.confidence}/100</strong></span></div>
+            <p>{period.activityNote}</p>
             <p><Wind size={15} /><span>{period.wind}</span></p>
             <p><Waves size={15} /><span>{period.waves}</span></p>
             <p><Droplets size={15} /><span>{period.water}</span></p>

@@ -12,8 +12,8 @@ import { DecisionApp } from "@/components/DecisionApp";
 import { SafetyChecklist } from "@/components/SafetyChecklist";
 
 const TRUST_ITEMS = [
-  { icon: ShieldCheck, title: "السلامة قبل الفرصة", text: "الخطر ونقص البيانات الحرجة يوقفان القرار قبل نقاط الصيد." },
-  { icon: BarChart3, title: "محرك قابل للتفسير", text: "48–72 ساعة، 63 عاملاً، أرقام ومصادر وحدود ظاهرة." },
+  { icon: ShieldCheck, title: "الموانع قبل أي رقم", text: "ريح، موج، جرّ، عكارة، رعد أو نشرة: ساعة ممنوعة لا تُفتح بترتيب السمك." },
+  { icon: BarChart3, title: "محرك قابل للتفسير", text: "ساعة بساعة: الموانع ظاهرة، والنشاط ترتيب نسبي لا وعد سمك." },
   { icon: HeartPulse, title: "مجاني وخصوصي", text: "لا حساب ولا اشتراك؛ مفتاح Gemini يبقى في متصفحك باختيارك." },
 ];
 
@@ -23,9 +23,9 @@ export default function Home() {
       <section className="report-intro" id="top">
         <div className="report-intro-copy">
           <div className="eyebrow"><Sparkles size={15} /> مبني خصيصاً لساحل تونس</div>
-          <h1>تقرير سيرفكاست دقيق<br /><em>قبل ما تمشي.</em></h1>
+          <h1>قرار الخرجة<br /><em>قبل ما تشدّ الطريق.</em></h1>
           <p>
-            نفس الرحلة المباشرة للمشروع الأصلي: اختار البقعة واليوم واتجاه البحر، واضغط زر واحد. Peche TN يرجّع <strong>اذهب أو لا تذهب</strong> وتقريراً ميدانياً كاملاً من المحرك، موش من التخمين.
+            اختار البقعة واليوم. اتجاه البحر يُجلب آلياً. المحرك يحسم <strong>اذهب أو لا تذهب</strong> من الموانع المحسوبة ساعة بساعة — مو تخمين ولا وعد سمك.
           </p>
           <div className="intro-badges">
             <span><ShieldCheck size={16} /> قرار ثنائي محافظ</span>
@@ -68,7 +68,7 @@ export default function Home() {
         <a className="brand footer-brand" href="#top"><span className="brand-mark"><Waves size={20} /></span><strong>Peche TN</strong></a>
         <p>أداة تونسية مجانية لدعم قرار سيرفكاست أكثر أماناً ووضوحاً.</p>
         <div className="footer-meta">
-          <span>الإصدار 1.16.0 · المعطيات البحرية تقريبية وقد تختلف محلياً.</span>
+          <span>التطبيق 1.16.0 · محرك القرار 1.11.7 · البحر في النموذج تقريبي وقد يختلف على الشاطئ.</span>
           <a href="/api/docs" target="_blank" rel="noreferrer">واجهة المطورين</a>
         </div>
       </footer>

@@ -29,7 +29,7 @@ const GOVERNORATES = Array.from(new Set(SPOT_PRESETS.map((spot) => spot.governor
 const MAX_SPOTS_PER_SWEEP = 24;
 
 const reasonLabels: Record<string, string> = {
-  safe_window: "نافذة آمنة",
+  safe_window: "ساعات بلا موانع",
   safety_hazard: "خطر سلامة",
   field_infeasible: "تثبيت العتاد صعب",
   critical_data_missing: "بيانات ناقصة",
@@ -104,10 +104,10 @@ export default function WilayasPage() {
     <main>
       <section className="wilaya-hero" id="top">
         <div className="eyebrow"><MapPinned size={15} /> وين نخرج اليوم؟</div>
-        <h1>اختر ولاياتك،<br /><em>ورتبلك أحسن البقع.</em></h1>
+        <h1>اختر ولاياتك،<br /><em>البقاع المفتوحة أولاً.</em></h1>
         <p>
-          المحرك يحلل البقع المعروفة في الولايات المختارة لنفس اليوم ويرتبها من الأحسن للأضعف:
-          كل بقعة بنتيجتها (اذهب / لا تذهب) وأحسن ساعة ومؤشر وجود السمك — ترتيب نسبي، موش احتمال مصيد.
+          المحرك يحلل البقع المعروفة في الولايات المختارة لنفس اليوم: اذهب أولاً، ثم لا تذهب. الترتيب داخل كل مجموعة لا يفتح بقعة ممنوعة.
+          كل بقعة: اذهب أو لا تذهب حسب الموانع، ثم ساعات بلا موانع إن وُجدت. مؤشر السمك ترتيب نسبي لا يغيّر القرار.
         </p>
       </section>
 
@@ -186,7 +186,7 @@ export default function WilayasPage() {
       {result && (
         <section className="wilaya-results" aria-label="نتائج الترتيب">
           <div className="wilaya-results-head">
-            <span>الترتيب من الأحسن إلى الأضعف</span>
+            <span>اذهب أولاً · داخلها ترتيب نسبي لا يغيّر القرار</span>
             <small><CalendarDays size={14} /> {formatDate(result.target_date)} · {result.ranked.length} بقعة</small>
           </div>
           {result.official_warning_check && (
@@ -232,12 +232,12 @@ function RankCard({ spot, rank }: { spot: RankSpotsResponse["ranked"][number]; r
         </p>
         <div className="wilaya-metrics">
           {windowText ? (
-            <span><small>أحسن ساعة</small><strong><bdi>{windowText}</bdi></strong></span>
+            <span><small>ساعات بلا موانع</small><strong><bdi>{windowText}</bdi></strong></span>
           ) : (
-            <span><small>أحسن ساعة</small><strong>—</strong></span>
+            <span><small>ساعات بلا موانع</small><strong>—</strong></span>
           )}
           <span><small>تنفيذ ميداني</small><strong>{fieldFeasibilityLabels[spot.field_status]}</strong></span>
-          <span><small>مؤشر الفرصة النسبي</small><strong><bdi>{spot.opportunity_score === null ? "غير متاح" : `${spot.opportunity_score}/100`}</bdi></strong></span>
+          <span><small>ترتيب نسبي (لا قرار)</small><strong><bdi>{spot.opportunity_score === null ? "غير متاح" : `${spot.opportunity_score}/100`}</bdi></strong></span>
           {spot.spring_folk_label ? (
             <span><small>المدّ</small><strong>{springNeapLabel(spot.spring_classification ?? "")} ({spot.spring_folk_label}){spot.spring_gabes_zone ? " · قابس" : ""}</strong></span>
           ) : null}

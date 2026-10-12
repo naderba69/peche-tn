@@ -26,7 +26,7 @@ export const metadata: Metadata = {
     template: "%s | Peche TN",
   },
   description:
-    "أداة مجانية وآمنة أولاً لتحليل الرياح والموج والمدّ واقتراح أفضل نافذة سيرفكاست على الساحل التونسي.",
+    "أداة مجانية وآمنة أولاً: اذهب أو لا تذهب حسب الموانع المحسوبة ساعة بساعة على الساحل التونسي.",
   applicationName: "Peche TN",
   manifest: "/manifest.webmanifest",
   icons: { icon: "/icon.svg", apple: "/icon-192.png" },

@@ -2,7 +2,7 @@
 // مصدر واحد مشترك بين الصفحة الرئيسية (قرب النوافذ) والتقرير الكامل.
 
 import type { DecisionLevel, Factor, HourDecision } from "@/lib/types";
-import { tideLabel, waveIncidenceLabel, windRelationLabel } from "@/lib/format";
+import { formatHour, tideLabel, waveIncidenceLabel, windRelationLabel } from "@/lib/format";
 
 const TUNIS_TZ = "Africa/Tunis";
 
@@ -19,6 +19,9 @@ export interface PeriodSummary {
   waves: string;
   water: string;
   warnings: string[];
+  gate: "empty" | "blocked" | "mixed" | "open";
+  openRange: string | null;
+  activityNote: string;
 }
 
 export const PERIODS = [
@@ -95,6 +98,12 @@ export function factorPriority(factor: Factor): number {
   return severity + impact + Math.min(Math.abs(factor.score_delta), 9) / 10;
 }
 
+function hourBlocked(hour: HourDecision): boolean {
+  if (hour.safety === "no_go" || hour.safety === "unknown") return true;
+  const field = hour.field_feasibility;
+  return field.holding_difficulty === "high" || field.turbidity_potential === "high";
+}
+
 function worstSafety(hours: HourDecision[]): DecisionLevel | null {
   if (!hours.length) return null;
   return hours.reduce(
@@ -125,22 +134,34 @@ export function buildPeriodSummary(
       waves: "لا توجد ساعات قابلة للتقييم",
       water: "لا توجد ساعات قابلة للتقييم",
       warnings: [],
+      gate: "empty",
+      openRange: null,
+      activityNote: "لا نشاط: لا ساعات في هذه الفترة.",
     };
   }
 
-  const windSpeeds = numericValues(hours, (hour) => hour.forecast.wind_speed_kmh);
-  const gusts = numericValues(hours, (hour) => hour.forecast.wind_gust_kmh);
-  const waveHeights = numericValues(hours, (hour) => hour.forecast.wave_height_m);
-  const wavePeriods = numericValues(hours, (hour) => hour.forecast.wave_period_s);
-  const currents = numericValues(hours, (hour) => hour.forecast.ocean_current_velocity_kmh);
-  const relation = dominant(hours.map((hour) => hour.derived.wind_relation).filter((value) => value !== "unknown"));
-  const incidence = dominant(hours.map((hour) => hour.derived.wave_incidence).filter((value) => value !== "unknown"));
-  const waterState = dominant(hours.map((hour) => hour.derived.tide_state).filter((value) => value !== "unknown"));
+  const openHours = hours.filter((hour) => !hourBlocked(hour));
+  const stats = openHours.length ? openHours : hours;
+  const windSpeeds = numericValues(stats, (hour) => hour.forecast.wind_speed_kmh);
+  const gusts = numericValues(stats, (hour) => hour.forecast.wind_gust_kmh);
+  const waveHeights = numericValues(stats, (hour) => hour.forecast.wave_height_m);
+  const wavePeriods = numericValues(stats, (hour) => hour.forecast.wave_period_s);
+  const currents = numericValues(stats, (hour) => hour.forecast.ocean_current_velocity_kmh);
+  const relation = dominant(stats.map((hour) => hour.derived.wind_relation).filter((value) => value !== "unknown"));
+  const incidence = dominant(stats.map((hour) => hour.derived.wave_incidence).filter((value) => value !== "unknown"));
+  const waterState = dominant(stats.map((hour) => hour.derived.tide_state).filter((value) => value !== "unknown"));
   const warnings = uniqueFactors(hours)
     .filter((factor) => factor.severity !== "info" || factor.impact === "data_gap")
     .sort((first, second) => factorPriority(second) - factorPriority(first))
     .slice(0, 3)
     .map((factor) => factor.explanation_ar);
+  const gate = !openHours.length ? "blocked" : openHours.length === hours.length ? "open" : "mixed";
+  const activityNote = !openHours.length
+    ? "لا يُعرض نشاط سمك: الفترة ممنوعة بالموانع المحسوبة."
+    : `ترتيب نسبي ${Math.round(average(openHours.map((hour) => hour.opportunity_score)) ?? 0)}/100 من الريح والموج والضوء والماء في الساعات المفتوحة — لا يغيّر اذهب/لا تذهب.`;
+  const openRange = openHours.length
+    ? `${formatHour(openHours[0].time)}–${formatHour(openHours[openHours.length - 1].time)}`
+    : null;
 
   const windAverage = average(windSpeeds);
   const gustMaximum = maximum(gusts);
@@ -152,9 +173,9 @@ export function buildPeriodSummary(
     range: definition.range,
     hours,
     safety: worstSafety(hours),
-    opportunity: Math.round(average(hours.map((hour) => hour.opportunity_score)) ?? 0),
-    field: minimum(hours.map((hour) => hour.field_feasibility.score)),
-    confidence: minimum(hours.map((hour) => hour.confidence.score)),
+    opportunity: openHours.length ? Math.round(average(openHours.map((hour) => hour.opportunity_score)) ?? 0) : null,
+    field: minimum(stats.map((hour) => hour.field_feasibility.score)),
+    confidence: minimum(stats.map((hour) => hour.confidence.score)),
     wind: windAverage === null
       ? "الريح غير متوفرة"
       : `${windAverage.toFixed(1)} كم/س كمعدل${gustMaximum === null ? "" : ` · أقصى هبة ${gustMaximum.toFixed(1)}`} · ${relation ? windRelationLabel(relation) : "العلاقة بالشاطئ ناقصة"}`,
@@ -163,5 +184,8 @@ export function buildPeriodSummary(
       : "بيانات الموج غير متوفرة",
     water: `${waterState ? tideLabel(waterState) : "حركة مستوى البحر ناقصة"}${currentMaximum === null ? "" : ` · تيار نموذجي حتى ${currentMaximum.toFixed(2)} كم/س`}`,
     warnings,
+    gate,
+    openRange,
+    activityNote,
   };
 }

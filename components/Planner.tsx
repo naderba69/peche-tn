@@ -401,12 +401,43 @@ export function Planner({ value, loading, error, hasResult, isDirty, onChange, o
           </label>
         </section>
 
-        <section className="planner-step" aria-labelledby="orientation-step-title">
+        <section className="planner-step" aria-labelledby="species-step-title">
           <div className="step-heading">
             <span className="step-index">3</span>
             <div>
-              <h3 id="orientation-step-title">تحليل اتجاه الساحل</h3>
-              <p>نجلب اتجاه الساحل آلياً ونُظهر مصدره؛ لا حاجة لإدخال اتجاه يدوي.</p>
+              <h3 id="species-step-title">شنوّة تصيد؟</h3>
+              <p>يضبط توقع النشاط والطعم. لا يفتح ساعة ممنوعة.</p>
+            </div>
+          </div>
+          <label>
+            <span className="field-caption">النوع المستهدف</span>
+            <select
+              aria-label="النوع المستهدف"
+              value={value.angler.target_species}
+              onChange={(event) =>
+                patch({
+                  angler: {
+                    ...valueRef.current.angler,
+                    target_species: event.target.value as ForecastDecisionRequest["angler"]["target_species"],
+                  },
+                })
+              }
+            >
+              <option value="general">صيد عام</option>
+              <option value="european_seabass">القاروص</option>
+              <option value="gilthead_seabream">الوراطة</option>
+              <option value="white_seabream">السار</option>
+              <option value="striped_seabream">المرمار</option>
+            </select>
+          </label>
+        </section>
+
+        <section className="planner-step" aria-labelledby="orientation-step-title">
+          <div className="step-heading">
+            <span className="step-index">4</span>
+            <div>
+              <h3 id="orientation-step-title">اتجاه الشاطئ</h3>
+              <p>نحسب أين البحر من الخريطة. إن تعذّر الحساب لن نقول «اذهب».</p>
             </div>
           </div>
 
@@ -433,14 +464,14 @@ export function Planner({ value, loading, error, hasResult, isDirty, onChange, o
                 <span>اتجاه البحر من مصدر الخريطة</span>
                 <strong>{orientationEvidence ? <bdi>{orientationEvidence.orientation_deg.toFixed(1)}°</bdi> : "غير متاح"}</strong>
               </div>
-              <small>لا يمكن إدخال الاتجاه يدوياً؛ عند تعذر المصدر تبقى القيمة Unknown.</small>
+              <small>لا يُدخل الاتجاه يدوياً. إن غاب الاتجاه يبقى غير معروف.</small>
             </div>
           </div>
 
           <div className="orientation-auto-panel" aria-live="polite">
             <div>
-              <strong>حساب الساحل الآلي</strong>
-              <span>OpenStreetMap Overpass — العمود المصحح على أقرب مقطع ساحلي</span>
+              <strong>حساب اتجاه البحر</strong>
+              <span>من خريطة الساحل — أقرب خط شاطئ للنقطة التي اخترتها</span>
             </div>
             <button
               type="button"
@@ -478,15 +509,15 @@ export function Planner({ value, loading, error, hasResult, isDirty, onChange, o
 
           <p className="orientation-help">
             <Compass size={16} />
-            <span><strong>الاشتقاق الآلي:</strong> نستخدم عمود الساحل المستخرج من الخريطة للمقارنة مع اتجاه قدوم الريح والموج. لا تُدخل اتجاهاً يدوياً؛ الدليل الهندسي ومصدره ودرجة ثقته معروضة أعلاه.</span>
+            <span><strong>لماذا الاتجاه؟</strong> لنعرف هل الريح والموج قادمان من البحر أم من البر. بلا اتجاه موثوق لا نقول اذهب.</span>
           </p>
 
           <div className={shoreProfileVerified ? "field-message success" : "field-message warning"} data-testid="automatic-spot-profile-status">
             <Info size={16} />
             <span>
               {resolvedShoreProfile
-                ? <>نوع الساحل من وسم OSM صريح: {resolvedShoreProfile.shore_type} — way/{resolvedShoreProfile.evidence_feature_id} v{resolvedShoreProfile.evidence_feature_version}، آخر تعديل {resolvedShoreProfile.evidence_feature_timestamp}، على {resolvedShoreProfile.feature_distance_m} م؛ التعرض Unknown وغير مستخدم.</>
-                : <><strong>OSM لم يوثّق نوع الساحل.</strong> إذا اخترته أنت أدناه، سنستخدمه كإدخال يدوي منفصل عن بيانات الخريطة.</>}
+                ? <>نوع الشاطئ من الخريطة: {resolvedShoreProfile.shore_type === "sandy" ? "رملي" : resolvedShoreProfile.shore_type === "rocky" ? "صخري" : resolvedShoreProfile.shore_type === "cliff" ? "جرف" : "رصيف"}.</>
+                : <><strong>الخريطة ما ثبّتتش نوع الشاطئ.</strong> اختاره تحت إن كنت تعرفه (رمل/صخر…).</>}
             </span>
           </div>
           <label className="shore-type-field" data-testid="manual-shore-type-field">
@@ -502,16 +533,16 @@ export function Planner({ value, loading, error, hasResult, isDirty, onChange, o
                 patch({ spot: { ...valueRef.current.spot, shore_type: shoreType, shore_type_source: shoreTypeSource, exposure: null } });
               }}
             >
-              <option value="">استخدم OSM إن وُجد، وإلا غير محدد</option>
+              <option value="">من الخريطة إن وُجد، وإلا غير محدد</option>
               <option value="sandy">رملي</option>
               <option value="rocky">صخري</option>
               <option value="cliff">جرف أو حافة</option>
               <option value="jetty">رصيف أو حاجز بحري</option>
             </select>
-            <small>اختيارك يُستخدم في الحساب ويظهر كإدخال يدوي؛ لا يُسجَّل كرصد ميداني أو وسم OSM. لا يضمن القرار «اذهب».</small>
+            <small>اختيارك يدخل الحساب. لا يضمن «اذهب» ولا يغني عن عينك على الأرض.</small>
           </label>
           <p className="orientation-help">
-            <Info size={16} /> يفحص التطبيق نشرة INM آلياً قبل السماح بقرار «اذهب».
+            <Info size={16} /> قبل «اذهب» يحاول التطبيق قراءة نشرة INM الرسمية. إن تعذر التأكد: لا تذهب. راجع النشرة بنفسك أيضاً من صفحة INM.
           </p>
         </section>
 

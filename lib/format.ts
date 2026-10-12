@@ -3,9 +3,9 @@ import type { DecisionLevel, FactorBasis, FieldFeasibilityLevel, PotentialLevel,
 const TUNIS_TZ = "Africa/Tunis";
 
 export const decisionLabels: Record<DecisionLevel, string> = {
-  go: "انطلق في النافذة المختارة",
-  caution: "انطلق بحذر",
-  no_go: "لا تنطلق",
+  go: "اذهب في الساعات بلا موانع",
+  caution: "حذر — ليست منعاً لليوم",
+  no_go: "لا تذهب",
   unknown: "المعطيات غير كافية",
 };
 

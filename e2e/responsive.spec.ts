@@ -195,7 +195,7 @@ function mockDecision(payload: ForecastDecisionRequest): DecisionResponse {
   const satelliteValidTime = new Date(satelliteRetrievedAt.getTime() - 72 * 60 * 60 * 1000);
   return {
     schema_version: "3.20",
-    engine_version: "1.10.2",
+    engine_version: "1.11.2",
     decision: "go",
     decision_reason_code: "safe_window",
     decision_label_ar: "اذهب",
@@ -221,7 +221,7 @@ function mockDecision(payload: ForecastDecisionRequest): DecisionResponse {
       turbidity_evidence_count: 1,
       antecedent_window_hours: 48,
       reasons_ar: [
-        "اعتمد التجميع أضعف ساعة داخل أفضل نافذة كإجراء محافظ.",
+        "اعتمد التجميع أضعف ساعة داخل ساعات بلا موانع كإجراء محافظ.",
         "صعوبة تثبيت الخط منخفضة في الفحص الآلي.",
         "قابلية نقل مادة موجودة متوسطة؛ لا يتوفر رصد لوجودها.",
       ],
@@ -402,7 +402,7 @@ function mockDecision(payload: ForecastDecisionRequest): DecisionResponse {
     generated_at: new Date().toISOString(),
     fisherman_report: {
       decision_label_ar: "اذهب",
-      decision_reason_ar: "نافذة آمنة اجتازت فحوص المحرك",
+      decision_reason_ar: "ساعات بلا موانع محسوبة",
       opportunity_score: 68,
       opportunity_note_ar: "مؤشر الفرصة ترتيب نسبي 0-100 للمقارنة؛ ليس نسبة نجاح ولا ضمان مصيد.",
       target_bait_ar: "طعم حي أو متحرك (سردين حي / سبيط) — القاروص يفضّل الحركة",
@@ -462,7 +462,7 @@ function mockDecision(payload: ForecastDecisionRequest): DecisionResponse {
       red_factors_ar: ["رياح جانبية قوية في الظهيرة (≈21 كم/س) مع هبات حتى ≈42 كم/س تصعّب الرمي."],
       green_factors_ar: ["الضغط الجوي مستقر (محايد).", "الموج منخفض وييسّر الرمي.", "ثقة المدخلات مقبولة على طول اليوم."],
       lead_advice_ar: "رصاص هرمي في مجال 100 إلى 140 غ؛ رصاص ثقيل نسبياً في الظهيرة لمواجهة الرياح.",
-      timing_advice_ar: "النافذة الأنسب 06:00-09:00؛ التزم بها ولا تمدّدها إذا تغيّر البحر على الأرض.",
+      timing_advice_ar: "ساعات بلا موانع محسوبة 06:00-09:00؛ خارجها لا تخرج. إن تغيّر البحر على الأرض أعد المعاينة.",
       distance_advice_ar: "المسافة المتوقعة بين 46 و 51 م حسب الفترة (تقدير موثق من وزن الرصاص والريح).",
       safety_advice_ar: "افحص معداتك قبل البدء، وانتبه للهبات المفاجئة وحركة الموج.",
       water_temp_c: 29.3,
@@ -590,7 +590,7 @@ test("mobile result stays readable, interactive, and marks stale choices", async
   await page.getByRole("button", { name: "حلّل 24 ساعة" }).click();
 
   await expect(page.getByRole("heading", { name: "اذهب" })).toBeVisible();
-  await expect(page.getByText("أفضل نافذة مقترحة")).toBeVisible();
+  await expect(page.getByText("ساعات بلا موانع محسوبة")).toBeVisible();
   await expect(page.getByRole("heading", { name: "القرار ساعة بساعة" })).toBeVisible();
   await expectNoPageOverflow(page);
 
@@ -603,8 +603,8 @@ test("mobile result stays readable, interactive, and marks stale choices", async
   const fieldReport = page.getByTestId("fisherman-report");
   await fieldReport.scrollIntoViewIfNeeded();
   await expect(fieldReport.getByRole("heading", { name: "التقرير الميداني المنظّم" })).toBeVisible();
-  await expect(fieldReport).toContainText("مؤشر الفرصة");
-  await expect(fieldReport).toContainText("ليس نسبة نجاح");
+  await expect(fieldReport).toContainText("ترتيب نسبي");
+  await expect(fieldReport).toContainText("لا يفتح ساعة ممنوعة");
   await expect(fieldReport).toContainText("العبور القمري العلوي");
   await expectNoPageOverflow(page);
 
@@ -664,7 +664,7 @@ test("the full spot report is scientific, complete, downloadable, and mobile-saf
   await expect(report).toBeVisible();
   await expect(reportTitle).toBeVisible();
   const primaryReason = report.locator(".report-primary-reason");
-  await expect(primaryReason).toContainText("لم ترصد مانعاً حاسماً للسلامة أو التنفيذ");
+  await expect(primaryReason).toContainText("لا مانع محسوب");
   await expect(primaryReason).not.toContainText("الأنشط فيها");
   await expect(report).toContainText("نسخة علمية، موش تنجيم");
   await expect(report).toContainText("مؤشر الفرصة");
@@ -1147,4 +1147,6 @@ test("Gemini key stays local, generation is explicit, and deterministic fallback
   expect(await page.evaluate(() => localStorage.getItem("peche-tn:gemini-api-key"))).toBeNull();
   await expect(gemini.getByTestId("gemini-key-input")).toHaveValue("");
   await expectNoPageOverflow(page);
+});
+Overflow(page);
 });

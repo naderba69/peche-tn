@@ -89,17 +89,14 @@ def test_midday_scores_lock_the_documented_priors(
     dataset_factory: Callable[..., ForecastDataset],
 ) -> None:
     result = engine.evaluate(_default(dataset_factory))
-    # Default dataset: sandy shore, 22°C water, wave 0.6 m (moderate sea state),
-    # September in the Tunis zone. Midday has no twilight/night bonus, so the
-    # score isolates the documented priors (base 50 + shore + SST + seasonal +
-    # sea state) and locks the formula:
-    #   القاروص: 50 +3 رمل -0 حرارة (22° خارج المفضل 13-21 وضمن التحمل) +6 موسمي = 59
-    #   الوراطة: 50 +3 +6 (مفضلة 17-26) +6 +5 (كسرة معتدلة مناسبة) = 70
-    #   السار:   50 -3 (رمل خارج صخر/رصيف) +6 (مفضلة 15-24) -6 (موسمي 1) +5 = 52
-    #   المرمار: 50 +3 +6 (مفضلة 16-26) +6 (حالة البحر معتدلة خارج الهدوء) = 65
-    assert _score_at(result, "القاروص", 12) == 59
+    # Default: sandy, 22°C, Hs 0.6 m (moderate), September, Tunis zone.
+    #   القاروص: 50 +3 رمل +0 حرارة (22° خارج ذروة 14-19 وداخل 8-24) +6 موسمي +5 كسرة = 64
+    #   الوراطة: 50 +3 +6 +6 +5 = 70
+    #   السار:   50 -3 رمل +6 حرارة +6 موسمي +5 = 64
+    #   المرمار: 50 +3 +6 +6 (معتدل خارج الهدوء) = 65
+    assert _score_at(result, "القاروص", 12) == 64
     assert _score_at(result, "الوراطة", 12) == 70
-    assert _score_at(result, "السار", 12) == 52
+    assert _score_at(result, "السار", 12) == 64
     assert _score_at(result, "المرمار", 12) == 65
 
 
@@ -107,9 +104,8 @@ def test_thermal_preference_orders_species_at_midday(
     dataset_factory: Callable[..., ForecastDataset],
 ) -> None:
     result = engine.evaluate(_default(dataset_factory))
-    # Same zone/month/sea-state: mormyrus (22°C inside its preferred 16-26°C)
-    # scores above seabass (22°C only tolerated; preferred 13-21°C) at midday.
-    assert _score_at(result, "المرمار", 12) > _score_at(result, "القاروص", 12)
+    # Same zone/month: sargus on sand is penalised vs mormyrus which matches sand.
+    assert _score_at(result, "المرمار", 12) > _score_at(result, "السار", 12)
 
 
 def test_indicator_never_changes_the_binary_decision(
@@ -218,39 +214,42 @@ def test_pressure_and_moon_priors_are_computed_and_disclosed() -> None:
             )
         )
 
-    # Falling pressure: +3 (value computed from the hPa series).
+    # Pressure is weather context only: no catch weight.
     score, contribs = _species_hour_activity(
         profile, fake_hour(is_night=False, pressure_change_3h=-2.0), **common
     )
-    assert score == 53
-    assert any("هبوط ضغط" in label for label, _d in contribs)
+    assert score == 50
+    assert not any("ضغط" in label for label, _d in contribs)
 
-    # Sharp rise: -3.
     score, contribs = _species_hour_activity(
         profile, fake_hour(is_night=False, pressure_change_3h=2.0), **common
     )
-    assert score == 47
-    assert any("صعود ضغط" in label for label, _d in contribs)
+    assert score == 50
 
-    # Moonlit night: general night bonus 1 + moonlight 3.
+    # Moonlight is astronomy only — never a feeding prior.
     score, contribs = _species_hour_activity(
         profile,
         fake_hour(is_night=True, pressure_change_3h=None),
         moon_illumination=0.9,
-        **common,
-    )
-    assert score == 54
-    assert any("ليلة مقمرة" in label for label, _d in contribs)
-
-    # New-moon night: no moonlight bonus (light channel absent).
-    score, contribs = _species_hour_activity(
-        profile,
-        fake_hour(is_night=True, pressure_change_3h=None),
-        moon_illumination=0.1,
+        target_species=TargetSpecies.GENERAL,
         **common,
     )
     assert score == 51
-    assert not any("ليلة مقمرة" in label for label, _d in contribs)
+    assert not any("مقمرة" in label for label, _d in contribs)
+
+    bass = SPECIES_PROFILES[TargetSpecies.EUROPEAN_SEABASS]
+    score, contribs = _species_hour_activity(
+        bass,
+        fake_hour(is_night=True, pressure_change_3h=None),
+        moon_illumination=0.9,
+        target_species=TargetSpecies.EUROPEAN_SEABASS,
+        sst=None,
+        sea_state="unknown",
+        zone="bizerte_tunis",
+        month=1,
+        shore_type=ShoreType.SANDY,
+    )
+    assert not any("مقمرة" in label for label, _d in contribs)
 
 
 def test_pressure_moon_priors_never_change_the_binary_decision(
@@ -265,23 +264,22 @@ def test_pressure_moon_priors_never_change_the_binary_decision(
     assert with_prior.decision == baseline.decision
     assert with_prior.decision_reason_code == baseline.decision_reason_code
     assert with_prior.opportunity_score == baseline.opportunity_score
-    # The reporting-only indicator does reflect the pressure signal.
     general = next(sp for sp in with_prior.species_activity if sp.label_ar == "صيد عام")
     midday = next(p for p in general.periods if p.key == "midday")
-    assert midday.factors_ar and any("هبوط ضغط" in item for item in midday.factors_ar)
+    assert not midday.factors_ar or not any("هبوط ضغط" in item for item in midday.factors_ar)
 
 
 def test_tide_and_lunar_day_helpers_are_small_and_bounded() -> None:
     from spotdata.domain.engine import _lunar_day_delta, _tide_channel_delta
 
-    assert _tide_channel_delta("spring") == 3
-    assert _tide_channel_delta("neap") == -3
+    assert _tide_channel_delta("spring") == 0
+    assert _tide_channel_delta("neap") == 0
     assert _tide_channel_delta("intermediate") == 0
     assert _tide_channel_delta("unknown") == 0
-    assert _lunar_day_delta(1.0) == 2  # full moon
-    assert _lunar_day_delta(0.0) == 2  # new moon
-    assert _lunar_day_delta(0.5) == 0  # first quarter
-    assert _lunar_day_delta(0.178) == 0  # the default test date stays neutral
+    assert _lunar_day_delta(1.0) == 0
+    assert _lunar_day_delta(0.0) == 0
+    assert _lunar_day_delta(0.5) == 0
+    assert _lunar_day_delta(0.178) == 0
 
 
 def test_spring_tide_pulls_fish_shoreward_in_the_indicator(
@@ -296,11 +294,9 @@ def test_spring_tide_pulls_fish_shoreward_in_the_indicator(
     )
     result = engine.evaluate(dataset)
     assert result.spring_neap.classification == "spring"
-    # General has no other priors: base 50 + spring tide 3 (day-level).
-    assert _score_at(result, "صيد عام", 12) == 53
-    assert any(
-        "المد اليوم" in line and "حيّة" in line for line in _species(result, "صيد عام").basis_ar
-    )
+    # Day-level spring/neap no longer moves fish toward the beach.
+    assert _score_at(result, "صيد عام", 12) == 50
+    assert any("قابس" in line for line in _species(result, "صيد عام").basis_ar)
 
 
 def test_neap_tide_pushes_fish_offshore_in_the_indicator(
@@ -315,7 +311,7 @@ def test_neap_tide_pushes_fish_offshore_in_the_indicator(
     )
     result = engine.evaluate(dataset)
     assert result.spring_neap.classification == "neap"
-    assert _score_at(result, "صيد عام", 12) == 47
+    assert _score_at(result, "صيد عام", 12) == 50
 
 
 def test_full_moon_day_adds_the_traditional_lunar_prior(
@@ -331,10 +327,5 @@ def test_full_moon_day_adds_the_traditional_lunar_prior(
         sunset=datetime(2026, 9, 26, 18, 30, tzinfo=TZ),
     )
     result = engine.evaluate(dataset)
-    # One sine amplitude across the day → intermediate tide (0). Full moon →
-    # traditional lunar-day prior +2, day-level: midday moves 50 → 52.
-    assert _score_at(result, "صيد عام", 12) == 52
-    assert any(
-        "اليوم القمري" in line and "قرب البدر" in line
-        for line in _species(result, "صيد عام").basis_ar
-    )
+    assert _score_at(result, "صيد عام", 12) == 50
+    assert any("سولونار" in line or "القاروص" in line for line in _species(result, "صيد عام").basis_ar)

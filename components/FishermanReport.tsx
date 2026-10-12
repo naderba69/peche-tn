@@ -21,6 +21,7 @@ import {
   Wind,
 } from "lucide-react";
 
+import { SpeciesActivityBoard } from "@/components/SpeciesActivityBoard";
 import type { FishermanReport, ReportPeriod } from "@/lib/types";
 
 function FormatValue({ value, suffix = "" }: { value: number | null | undefined; suffix?: string }) {
@@ -53,6 +54,7 @@ function PeriodCard({ period }: { period: ReportPeriod }) {
       <header>
         <strong>{period.label_ar}</strong>
         <span>{period.range_ar}</span>
+        {period.gate_ar ? <small>{period.gate_ar}{period.open_range_ar ? ` · ${period.open_range_ar}` : ""}</small> : null}
       </header>
       {hasData ? (
         <div className="fr-period-grid">
@@ -86,9 +88,16 @@ function PeriodCard({ period }: { period: ReportPeriod }) {
       ) : (
         <p className="fr-empty">{period.state_ar}</p>
       )}
+      {period.species_forecasts && period.species_forecasts.length > 0 ? (
+        <SpeciesActivityBoard rows={period.species_forecasts} compact />
+      ) : period.species_top_ar ? (
+        <p className="fr-activity"><Fish size={13} /> {period.species_top_ar}</p>
+      ) : null}
+      {period.activity_ar ? <p className="fr-activity">{period.activity_ar}</p> : null}
+      {period.gabes_tide_ar ? <p className="fr-activity">{period.gabes_tide_ar}</p> : null}
       <div className="fr-period-extra">
-        <span><Thermometer size={13} /> العكارة: {period.turbidity_ar}</span>
-        <span><Anchor size={13} /> {period.montage_ar}</span>
+        <span><Thermometer size={13} /> {period.turbidity_ar}</span>
+        {period.gate_ar === "ممنوعة" ? null : <span><Anchor size={13} /> {period.montage_ar}</span>}
       </div>
       {period.warnings_ar.length > 0 && (
         <ul className="fr-warnings">
@@ -124,7 +133,7 @@ export function FishermanReportView({ report }: { report: FishermanReport }) {
             <small>{report.decision_reason_ar}</small>
           </div>
           <div className="fr-exec-item">
-            <span><Gauge size={15} /> مؤشر الفرصة</span>
+            <span><Gauge size={15} /> ترتيب نسبي</span>
             <strong><bdi>{report.opportunity_score}/100</bdi></strong>
             <small>{report.opportunity_note_ar}</small>
           </div>
@@ -143,27 +152,27 @@ export function FishermanReportView({ report }: { report: FishermanReport }) {
         </div>
       </div>
 
+      {report.fish_forecasts && report.fish_forecasts.length > 0 ? (
+        <div className="fr-block">
+          <h4><Fish size={16} /> توقع نشاط كل نوع</h4>
+          <p className="fr-forecast-head">{report.fish_forecast_headline_ar}</p>
+          <SpeciesActivityBoard rows={report.fish_forecasts} />
+          {report.fish_forecasts[0]?.unknowns_ar && report.fish_forecasts[0].unknowns_ar.length > 0 ? (
+            <p className="fr-note">غير مقيس عمداً: {report.fish_forecasts[0].unknowns_ar.join("، ")}</p>
+          ) : null}
+          <p className="fr-note">{report.fish_forecast_note_ar}</p>
+        </div>
+      ) : null}
+
       {/* 1. التوقيت وحركة المياه */}
       <div className="fr-block">
         <h4><Clock3 size={16} /> 1. التوقيت وحركة المياه</h4>
         <div className="fr-timing-grid">
-          {report.moon_upper_transit_ar && (
-            <div className="fr-timing"><Moon size={15} /><span>العبور القمري العلوي (تقديري)</span><strong><bdi>{report.moon_upper_transit_ar}</bdi></strong></div>
-          )}
-          {report.moon_lower_transit_ar && (
-            <div className="fr-timing"><Moon size={15} /><span>العبور القمري السفلي (تقديري)</span><strong><bdi>{report.moon_lower_transit_ar}</bdi></strong></div>
-          )}
-          {report.moonrise_ar && (
-            <div className="fr-timing"><Moon size={15} /><span>طلوع القمر</span><strong><bdi>{report.moonrise_ar}</bdi></strong></div>
-          )}
-          {report.moonset_ar && (
-            <div className="fr-timing"><Moon size={15} /><span>غروب القمر</span><strong><bdi>{report.moonset_ar}</bdi></strong></div>
-          )}
           {report.sunrise_ar && (
-            <div className="fr-timing"><Sunrise size={15} /><span>الشروق</span><strong><bdi>{report.sunrise_ar}</bdi></strong></div>
+            <div className="fr-timing"><Sunrise size={15} /><span>الشروق (شفق)</span><strong><bdi>{report.sunrise_ar}</bdi></strong></div>
           )}
           {report.sunset_ar && (
-            <div className="fr-timing"><Sunset size={15} /><span>الغروب</span><strong><bdi>{report.sunset_ar}</bdi></strong></div>
+            <div className="fr-timing"><Sunset size={15} /><span>الغروب (شفق)</span><strong><bdi>{report.sunset_ar}</bdi></strong></div>
           )}
         </div>
         <div className="fr-tide-line">
@@ -174,16 +183,13 @@ export function FishermanReportView({ report }: { report: FishermanReport }) {
         <div className="fr-pressure">
           <span><Gauge size={14} /> الضغط الجوي: <strong><FormatValue value={report.pressure_hpa} suffix=" hPa" /></strong> · {report.pressure_trend_ar}</span>
           <span><Waves size={14} /> مؤشر الشاطئ: <strong>{report.beach_summary_ar}</strong></span>
-          {report.moon_illumination_pct !== null && (
-            <span><Moon size={14} /> إضاءة القمر: <strong><bdi>{report.moon_illumination_pct}%</bdi></strong></span>
-          )}
         </div>
       </div>
 
       {/* 2. الأوقات الفلكية المرجعية */}
       {moonTimes.length > 0 && (
         <div className="fr-block">
-          <h4><Moon size={16} /> 2. الأوقات الفلكية المرجعية</h4>
+          <h4><Moon size={16} /> 2. فلك — لا يدخل الصيد</h4>
           <ul className="fr-astro-list">
             {moonTimes.map((item) => (
               <li key={`${item.kind}-${item.time_ar}`}>

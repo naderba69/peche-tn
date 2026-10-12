@@ -141,13 +141,13 @@ SEA_STATE_LABELS_AR = {
     "unknown": "حالة البحر غير متاحة",
 }
 
-# Rough classification thresholds on significant wave height (metres). These
-# are presentation bands, not safety gates — safety keeps its own audited
-# thresholds in policy.py.
-_CALM_MAX_M = 0.6
-_ROUGH_MIN_M = 1.1
-# Foam (whitecaps) is estimated from the model, not observed: whitecaps become
-# common around ~0.8 m waves and under sustained wind >= ~22 km/h (Beaufort ~4).
+# Presentation bands on modelled Hs — not safety gates (those stay in policy.py).
+# 1.1 m is ordinary Mediterranean chop, not a storm; "rough" starts where
+# surfcasting holding and reading bites typically collapse.
+_CALM_MAX_M = 0.55
+_ROUGH_MIN_M = 1.25
+# Whitecaps need water movement, not wind alone (a dry offshore breeze must not
+# flag foam). Require Hs and either steep waves or wind on a moving surface.
 _FOAM_WAVE_M = 0.8
 _FOAM_WIND_KMH = 22.0
 
@@ -176,7 +176,9 @@ def classify_sea_state(wave_m: float | None, wind_kmh: float | None) -> tuple[st
         state = "moderate"
     else:
         state = "rough"
-    foam = wave_m >= _FOAM_WAVE_M or (wind_kmh is not None and wind_kmh >= _FOAM_WIND_KMH)
+    foam = wave_m >= _FOAM_WAVE_M and (
+        wave_m >= 1.0 or (wind_kmh is not None and wind_kmh >= _FOAM_WIND_KMH)
+    )
     return state, foam
 
 
@@ -240,30 +242,30 @@ SPECIES_PROFILES: dict[TargetSpecies, SpeciesProfile] = {
     ),
     TargetSpecies.EUROPEAN_SEABASS: SpeciesProfile(
         label_ar="القاروص",
-        preferred_sst_c=(13.0, 21.0),
-        tolerated_sst_c=(10.0, 25.0),
+        preferred_sst_c=(14.0, 19.0),
+        tolerated_sst_c=(8.0, 24.0),
         twilight_bonus=11,
         night_bonus=5,
         preferred_shores=frozenset({ShoreType.SANDY, ShoreType.ROCKY}),
         habitat_ar="رمل وصخر؛ يقترب من الكسرة والمصبات والبحيرات ليلاً وقرب الغسق",
-        # Mediterranean winter spawning (Dec-Mar, earlier in the warm south),
-        # coastal presence strongest winter-spring, weakest in summer; the
-        # southern lagoons (Gulf of Gabès/Djerba) are leanest in summer.
+        # Coastal feeding presence, not spawning intensity. Summer is leaner
+        # (deeper/nocturnal) but never "unavailable" — 0 is reserved for true
+        # absence of evidence, which we do not have for Tunisia.
         season_months_x_zone=_season(
             {
-                "northwest": "333221112333",
-                "bizerte_tunis": "333221112333",
-                "cap_bon_hammamet": "333221112333",
-                "sahel": "222221112233",
-                "gabes": "333210001233",
-                "south": "332210001233",
+                "northwest": "333222112333",
+                "bizerte_tunis": "333222112333",
+                "cap_bon_hammamet": "333222112333",
+                "sahel": "222222112233",
+                "gabes": "222211111222",
+                "south": "222211111222",
             }
         ),
         sources=("seabass_med_winter", "seabass_surf_zone", "seabass_tunis_lagoons"),
         sea_state_preference=SeaStatePreference(
-            label_ar="بحر متكسر مع رغوة (منطقة الكسرة)",
-            basis_ar="نوع منطقة الكسرة: يتغذى ويحتمي فيها صغاره، ويُصطاد قرب الموج المتكسر والرغوة (Cervera et al. 2024؛ FishBase). نمط متوسطي عام غير مدقق بدراسة تونسية محددة.",
-            preferred=frozenset({"rough"}),
+            label_ar="كسرة معتدلة مع رغوة خفيفة",
+            basis_ar="نوع منطقة الكسرة: يتغذى قرب الموج المتكسر لا في العاصفة (Cervera et al. 2024). Hs≥1.25 م غالباً يُخرج السمك ويصعّب التثبيت — نمط متوسطي، ليس تونسياً معايرة.",
+            preferred=frozenset({"moderate"}),
             sources=("seabass_surf_zone",),
         ),
     ),
@@ -275,24 +277,23 @@ SPECIES_PROFILES: dict[TargetSpecies, SpeciesProfile] = {
         night_bonus=2,
         preferred_shores=frozenset({ShoreType.SANDY, ShoreType.ROCKY}),
         habitat_ar="رمل وصخر؛ قرب الحشائش والقنوات الساحلية والبحيرات",
-        # Gulf of Gabès: reproduction October-February, peak December-January
-        # (Hadj-Taieb et al. 2013); Mediterranean lagoon cycle Nov-Feb. Coastal
-        # peak in autumn-winter, moderate spring, weakest in summer.
+        # Spawning (Oct-Feb) often moves adults off the throw; shore catchability
+        # is treated as autumn feeding + lagoon/estuary presence, not spawn peak.
         season_months_x_zone=_season(
             {
-                "northwest": "322221112333",
-                "bizerte_tunis": "322221112333",
-                "cap_bon_hammamet": "322221112333",
-                "sahel": "222221112233",
-                "gabes": "322221112333",
-                "south": "222221112333",
+                "northwest": "222222122333",
+                "bizerte_tunis": "222222122333",
+                "cap_bon_hammamet": "222222122333",
+                "sahel": "222222122233",
+                "gabes": "222222122333",
+                "south": "222222122333",
             }
         ),
         sources=("aurata_gulf_gabes", "aurata_med_lagoon", "aurata_surf_zone"),
         sea_state_preference=SeaStatePreference(
-            label_ar="كسرة معتدلة على رمل/أعشاب",
-            basis_ar="قاعية في القيعان الرملية وأعشاب البحر ومنطقة الكسرة حتى ~30م (FishBase؛ JMSE 2023) — نمط كسرة معتدلة لا ماء هائج دائم. نمط متوسطي عام.",
-            preferred=frozenset({"moderate"}),
+            label_ar="ماء هادئ إلى كسرة خفيفة على رمل/أعشاب",
+            basis_ar="قاعية في الرمل والأعشاب والكسرة حتى ~30م (FishBase؛ JMSE 2023). الهدوء والكسرة الخفيفة أنسب من الماء الهائج.",
+            preferred=frozenset({"calm", "moderate"}),
             sources=("aurata_surf_zone",),
         ),
     ),
@@ -304,24 +305,23 @@ SPECIES_PROFILES: dict[TargetSpecies, SpeciesProfile] = {
         night_bonus=3,
         preferred_shores=frozenset({ShoreType.ROCKY, ShoreType.JETTY}),
         habitat_ar="صخر وأرصفة وحواجز؛ قرب الصخور المغمورة",
-        # Gulf of Tunis (Mouine et al. 2007): sexual activity Jan-May, spawning
-        # Mar-May (peak Mar-Apr), gonads resting Jul-Oct. Spring peak on rocks,
-        # summer resting, spawning starts earlier toward the warmer south.
+        # Resident on rocks year-round. Gonad rest (Jul-Oct) is not departure;
+        # dawn surf feeding continues. Spring remains the strongest shore pulse.
         season_months_x_zone=_season(
             {
-                "northwest": "223332111122",
-                "bizerte_tunis": "223332111122",
-                "cap_bon_hammamet": "223332111122",
-                "sahel": "233332111112",
-                "gabes": "233332111112",
-                "south": "233332111112",
+                "northwest": "223332222222",
+                "bizerte_tunis": "223332222222",
+                "cap_bon_hammamet": "223332222222",
+                "sahel": "233332222222",
+                "gabes": "233332222222",
+                "south": "233332222222",
             }
         ),
         sources=("sargus_gulf_tunis", "sargus_surf_zone"),
         sea_state_preference=SeaStatePreference(
-            label_ar="موج يتكسر على الصخور (منطقة الاندفاع)",
-            basis_ar="يرتاد منطقة الكسرة فجراً ويتغذى على اللافقاريات التي يفصلها ضرب الموج عن الصخور (FishBase Ref. 13780؛ PLOS ONE 2016). نمط متوسطي عام.",
-            preferred=frozenset({"rough", "moderate"}),
+            label_ar="موج يتكسر على الصخور دون عاصفة",
+            basis_ar="يرتاد الكسرة فجراً ويتغذى على ما يفصله الموج (FishBase؛ PLOS ONE 2016) وينزاح للأعمق في العواصف الشديدة.",
+            preferred=frozenset({"moderate"}),
             sources=("sargus_surf_zone",),
         ),
     ),
@@ -338,9 +338,9 @@ SPECIES_PROFILES: dict[TargetSpecies, SpeciesProfile] = {
         # applied to northern Tunisia until locally verified. Winter is weak.
         season_months_x_zone=_season(
             {
-                "northwest": "001223332100",
-                "bizerte_tunis": "001233332100",
-                "cap_bon_hammamet": "001233332100",
+                "northwest": "111223332111",
+                "bizerte_tunis": "111233332111",
+                "cap_bon_hammamet": "111233332111",
                 "sahel": "111233332211",
                 "gabes": "112222123331",
                 "south": "111222112221",

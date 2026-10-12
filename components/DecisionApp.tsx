@@ -29,7 +29,7 @@ const initialRequest = (): ForecastDecisionRequest => ({
   },
 });
 
-const REQUEST_TIMEOUT_MS = 30_000;
+const REQUEST_TIMEOUT_MS = 45_000;
 const subscribeToHydration = () => () => undefined;
 
 type ApiState =
@@ -125,7 +125,7 @@ export function DecisionApp() {
       if (cause instanceof DOMException && cause.name === "AbortError" && !timedOut) return;
       setError(
         timedOut
-          ? "التحليل استغرق أكثر من 30 ثانية. ثبّت اتصالك وعاود المحاولة."
+          ? "التحليل استغرق أكثر من 45 ثانية. ثبّت اتصالك وعاود المحاولة."
           : cause instanceof Error
             ? cause.message
             : "تعذر إصدار القرار.",

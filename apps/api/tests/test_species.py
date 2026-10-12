@@ -300,8 +300,8 @@ def test_sea_state_fit_tracks_wave_and_wind(
     assert rough_result.decision == DecisionLevel.NO_GO
     assert rough_result.decision_reason_code == DecisionReasonCode.CONSERVATIVE_UNCERTAINTY
     rough_by_species = {m.species: m for m in rough_result.species_axes.species_matches}
-    assert rough_by_species["european_seabass"].sea_state_fit == "favorable"
-    assert rough_by_species["white_seabream"].sea_state_fit == "favorable"
+    assert rough_by_species["european_seabass"].sea_state_fit == "neutral"
+    assert rough_by_species["white_seabream"].sea_state_fit == "neutral"
     assert rough_by_species["striped_seabream"].sea_state_fit == "neutral"
     assert "هائج" in rough_result.species_axes.sea_state_ar
     assert "رغوة" in rough_result.species_axes.sea_state_ar

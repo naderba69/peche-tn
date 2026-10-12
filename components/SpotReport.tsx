@@ -105,7 +105,7 @@ const decisionReasonLabels = {
 } as const;
 const decisionReportLabels: Record<DecisionLevel, string> = {
   go: "اذهب",
-  caution: "فرصة مع تحفظات",
+  caution: "حذر",
   no_go: "لا تذهب",
   unknown: "بيانات غير كافية لقرار مسؤول",
 };
@@ -278,11 +278,11 @@ function buildFieldGuidance(
   ];
   const leadWindow = result.recommended_windows[0];
   if (leadWindow) {
-    guidance.push(`إذا قررت الانطلاق، التزم أساساً بنافذة ${formatWindowRange(leadWindow.start, leadWindow.end)} ولا تمددها تلقائياً بعد تغيّر الظروف.`);
+    guidance.push(`إن القرار اذهب: اخرج فقط من ${formatWindowRange(leadWindow.start, leadWindow.end)}. خارج هذه الساعات لا تخرج.`);
   } else if (result.decision_context_ar?.length) {
     guidance.push(...result.decision_context_ar);
   } else {
-    guidance.push("لا توجد نافذة متواصلة اجتازت فحص المحرك؛ تغيير البقعة أو اليوم أفضل من تركيب خطة على ساعة منفردة.");
+    guidance.push("لا تذهب: لا توجد ساعتان متتاليتان بلا مانع محسوب. لا تُركَّب خطة على ساعة منفردة أو على الشفق.");
   }
 
   const field = result.field_feasibility;
@@ -461,8 +461,8 @@ function buildReportText(
     `• القرار النهائي: ${decisionReportLabels[result.decision]}`,
     `• السبب: ${buildPrimaryReason(result)}`,
     ...(result.decision_context_ar ?? []).map((item) => `• توضيح فحص الطقس: ${item}`),
-    ...(lead ? [`• النافذة التي ينطبق عليها القرار: ${formatWindowRange(lead.start, lead.end)}.`] : []),
-    ...(windowCautions.length ? [`• تحفظات داخل النافذة: ${windowCautions.join(" · ")}.`] : []),
+    ...(lead ? [`• ساعات بلا موانع: ${formatWindowRange(lead.start, lead.end)}.`] : []),
+    ...(windowCautions.length ? [`• حذر داخل الساعات المفتوحة: ${windowCautions.join(" · ")}.`] : []),
     `• دعم بيانات التوقع: ${result.confidence.score}/100 — مؤشر اكتمال/اتساق/أفق، لا احتمال دقة أو سلامة.`,
     `• قابلية التنفيذ وفق النموذج: ${fieldFeasibilityLabels[result.field_feasibility.status]}; دعم الأدلة ${result.field_feasibility.confidence}/100 (سقفه 50 دون رصد محلي؛ ليس احتمال سلامة).`,
     `• مؤشرات النقل النموذجية: صعوبة تثبيت الخط ${potentialLabels[result.field_feasibility.holding_difficulty]} · نقل الصوفة/الحطام ${potentialLabels[result.field_feasibility.fouling_transport_potential]} · ظروف التعكير ${potentialLabels[result.field_feasibility.turbidity_potential]} · تيار ساحبي ${potentialLabels[result.field_feasibility.rip_current_potential]}. هذه تقديرات نموذجية وليست مشاهدات.`,
@@ -671,7 +671,7 @@ export function SpotReport({ result, request, stale = false, onClose }: SpotRepo
           <article className={`report-verdict report-verdict-${result.decision}`}><small>القرار النهائي · {decisionReasonLabels[result.decision_reason_code]}</small><strong>{decisionReportLabels[result.decision]}</strong><p>{result.summary_ar}</p></article>
           <article className="report-field-summary"><small>مؤشر التنفيذ النموذجي · غير ميداني</small><strong>{fieldFeasibilityLabels[result.field_feasibility.status]}</strong><p>الدرجة الداخلية {result.field_feasibility.score}/100؛ دعم الأدلة {result.field_feasibility.confidence}/100 (سقف 50 دون رصد محلي)، وليست نسبة سلامة.</p></article>
           <article><small>مؤشر الفرصة النسبي</small><strong><bdi>{result.opportunity_score}/100</bdi></strong><p>ترتيب نسبي، موش احتمال مصيد.</p></article>
-          <article><small>دعم بيانات التوقع</small><strong><bdi>{result.confidence.score}/100</bdi></strong><p>{confidenceLabel(result.confidence.score)} · اكتمال واتساق وأفق فقط، لا دقة متحققة ولا احتمال سلامة. {result.recommended_windows.length ? "أضعف قيمة داخل النافذة الأفضل." : "أضعف قيمة خلال الساعات المقيمة."}</p></article>
+          <article><small>دعم بيانات التوقع</small><strong><bdi>{result.confidence.score}/100</bdi></strong><p>{confidenceLabel(result.confidence.score)} · اكتمال واتساق وأفق فقط، لا دقة متحققة ولا احتمال سلامة. {result.recommended_windows.length ? "أضعف قيمة داخل الساعات بلا موانع." : "أضعف قيمة خلال الساعات المقيمة."}</p></article>
           <article><small>الهدف والإعداد</small><strong>{targetLabels[request.angler.target_species]}</strong><p>تحليل يوم كامل: 24 ساعة · {serverSpot.shore_type ? shoreLabels[serverSpot.shore_type] : "نوع الساحل غير محدد — القرار لا تذهب"} ({shoreTypeSourceLabels[shoreTypeSource]}) · {serverSpot.exposure ? exposureLabels[serverSpot.exposure] : "التعرض غير معروف"}<br />الطعم والمونتاج يحتاجان معطيات ميدانية إضافية.</p></article>
           <article><small>اتجاه البحر من موضع الوقوف</small><strong><bdi>{serverSpot.seaward_orientation_deg === null ? "Unknown" : `${serverSpot.seaward_orientation_deg.toFixed(0)}° · ${compassLabel(serverSpot.seaward_orientation_deg)}`}</bdi></strong><p>{orientationSourceLabels[serverSpot.orientation_source]}</p></article>
           {serverSpot.orientation_evidence && <article><small>مصدر اتجاه الساحل</small><strong><bdi>مماس {serverSpot.orientation_evidence.coastline_tangent_deg.toFixed(1)}° · بعد {serverSpot.orientation_evidence.coastline_distance_m.toFixed(0)} م</bdi></strong><p>Overpass · نصف بحث {serverSpot.orientation_evidence.search_radius_m} م · ثقة {orientationConfidenceLabels[serverSpot.orientation_evidence.confidence]}<br /><bdi>{serverSpot.orientation_evidence.server}</bdi></p></article>}
@@ -703,14 +703,14 @@ export function SpotReport({ result, request, stale = false, onClose }: SpotRepo
         <div className="report-section-title"><span>2</span><div><h3 id="report-windows-title">نوافذ الحصة</h3><p>فترات متواصلة، وليست ساعة خضراء معزولة.</p></div></div>
         {result.recommended_windows.length ? <div className="report-window-list">{result.recommended_windows.map((window, index) => (
           <article key={`${window.start}-${window.end}`} className={index === 0 ? "lead" : ""}>
-            <span className="report-window-rank">{index === 0 ? <><Sparkles size={13} /> الأنسب</> : `خيار ${index + 1}`}</span>
+            <span className="report-window-rank">{index === 0 ? "بدون موانع" : `فترة ${index + 1}`}</span>
             <strong><bdi>{formatWindowRange(window.start, window.end)}</bdi></strong>
             <div><span>مؤشر تنفيذ {window.field_score}/100</span><span>فرصة نسبية {window.opportunity_score}/100</span><span>دعم بيانات {window.confidence_score}/100</span><span className={`report-safety-${window.safety}`}>{shortDecisionLabels[window.safety]}</span></div>
             <p>{window.headline_ar}</p>
           </article>
         ))}</div> : <p className="report-empty">لا توجد نافذة متواصلة اجتازت حدود المحرك.</p>}
         {result.avoid_windows.length > 0 && <div className="report-avoid"><strong>فترات تتجنبها</strong>{result.avoid_windows.map((window) => <p key={`${window.start}-${window.end}`}><AlertTriangle size={15} /><bdi>{formatWindowRange(window.start, window.end)}</bdi><span>{window.key_factors_ar.join(" · ")}</span></p>)}</div>}
-        {result.recommended_windows.length > 0 && result.avoid_windows.length > 0 && <p className="report-method-note"><Info size={15} /><span><strong>الخطر مربوط بوقته.</strong> فترة الرعد أو التجنب لا تلغي نافذة أخرى اجتازت البوابات؛ التزم بحدود النافذة ولا تمددها إلى وقت الخطر.</span></p>}
+        {result.recommended_windows.length > 0 && result.avoid_windows.length > 0 && <p className="report-method-note"><Info size={15} /><span><strong>الخطر مربوط بوقته.</strong> ساعات المنع لا تُفتح. اخرج فقط في الساعات بلا موانع.</span></p>}
       </section>
 
       <section className="report-section report-species-section" aria-labelledby="report-species-title" hidden={reportTab !== "fish"}>
@@ -740,7 +740,7 @@ export function SpotReport({ result, request, stale = false, onClose }: SpotRepo
               <div className="report-species-matches">
                 <div className="report-species-matches-head">
                   <span>🐟 توفر الأسماك اليوم وملاءمتها للعوامل الحالية</span>
-                  <small>ترتيب من الأنسب إلى الأضعف · تقريري لا يغيّر القرار</small>
+                  <small>ترتيب نسبي داخل الساعات المفتوحة · لا يغيّر اذهب/لا تذهب</small>
                 </div>
                 {result.species_axes.sea_state_ar && (
                   <p className="report-sea-state-line">🌊 {result.species_axes.sea_state_ar}</p>
@@ -1003,7 +1003,7 @@ export function SpotReport({ result, request, stale = false, onClose }: SpotRepo
         </div>}
         {fieldContext && <p className="report-method-note"><Info size={15} /><span>آخر الساعات من Open-Meteo استُخدمت كسياق حسابي للتراكمات والاستمرارية، لا كتوقع للفترة المستهدفة ولا كقياس ميداني.</span></p>}
         <div className="report-field-evidence"><ul>{result.field_feasibility.reasons_ar.map((reason) => <li key={reason}>{reason}</li>)}</ul></div>
-        <div className="report-method-note report-proxy-note"><Info size={15} /><span><strong>هذه مؤشرات تنبيه لا موانع آلية.</strong> لا تلغي نافذة آمنة بلا رصد، لكن رمية يجرّها البحر، صوفة على الخيط، عكارة ظاهرة، أو قناة رغوة/حطام إلى عرض البحر تعني تغيير الموضع أو التأجيل مهما كان التوقع.</span></div>
+        <div className="report-method-note report-proxy-note"><Info size={15} /><span><strong>هذه مؤشرات تنبيه لا موانع آلية إلا العكارة/الجرّ العاليين المحسوبين.</strong> رمية يجرّها البحر أو صوفة على الخيط أو قناة رغوة على الأرض تعني التأجيل حتى لو التطبيق قال اذهب.</span></div>
       </section>
 
       <section className="report-section" aria-labelledby="report-periods-title" hidden={reportTab !== "feasibility"}>

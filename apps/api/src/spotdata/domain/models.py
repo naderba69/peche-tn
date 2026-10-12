@@ -688,6 +688,16 @@ class FactorAssessment(StrictModel):
 SCHEMA_VERSION: Literal["3.20"] = "3.20"
 
 
+class SpeciesPeriodScore(StrictModel):
+    """One species' relative activity inside a day block (open hours)."""
+
+    species: str
+    label_ar: str
+    score: int | None = Field(default=None, ge=0, le=100)
+    mode_ar: str = ""
+    drivers_ar: list[str] = Field(default_factory=list)
+
+
 class ReportPeriod(StrictModel):
     """One of the four fixed day blocks inside the deterministic field report."""
 
@@ -708,6 +718,27 @@ class ReportPeriod(StrictModel):
     turbidity_ar: str
     montage_ar: str
     warnings_ar: list[str] = Field(default_factory=list)
+    gate_ar: str = ""
+    open_range_ar: str | None = None
+    activity_ar: str = ""
+    gabes_tide_ar: str | None = None
+    activity_score: int | None = Field(default=None, ge=0, le=100)
+    species_top_ar: str | None = None
+    species_forecasts: list[SpeciesPeriodScore] = Field(default_factory=list)
+
+
+class SpeciesForecast(StrictModel):
+    """Relative activity forecast for one profiled species (open hours only)."""
+
+    species: str
+    label_ar: str
+    score: int | None = Field(default=None, ge=0, le=100)
+    mode_ar: str
+    drivers_ar: list[str] = Field(default_factory=list)
+    bait_ar: str
+    coverage_pct: int = Field(default=0, ge=0, le=100)
+    reliability_ar: str = ""
+    unknowns_ar: list[str] = Field(default_factory=list)
 
 
 class AstronomicalTime(StrictModel):
@@ -757,6 +788,11 @@ class FishermanReport(StrictModel):
     # 2. Astronomical reference times (movement periods)
     astronomical_times: list[AstronomicalTime] = Field(default_factory=list)
     astronomy_note_ar: str
+
+    # Fish activity forecast (relative; never opens a blocked hour)
+    fish_forecast_headline_ar: str = ""
+    fish_forecasts: list[SpeciesForecast] = Field(default_factory=list)
+    fish_forecast_note_ar: str = ""
 
     # 3. Temporal breakdown
     periods: list[ReportPeriod] = Field(default_factory=list)

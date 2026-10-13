@@ -1139,3 +1139,21 @@ def test_rip_current_high_needs_intersection_not_a_sum(
 
     result = engine.evaluate(dataset_factory(per_hour=only_height, count=48))
     assert result.hourly[0].field_feasibility.rip_current_potential != PotentialLevel.HIGH
+
+
+def test_rip_safety_floor_keeps_previously_high_hours_high(
+    dataset_factory: Callable[..., ForecastDataset],
+) -> None:
+    # Hs 1.2 m (+3), T 8 s (+2), jetty (+2) = 7 points, but waves run parallel to the
+    # coast, so the intersection fails. The older additive rule rated this HIGH;
+    # the safety floor must keep it HIGH.
+    def jetty_surge(index: int, values: dict[str, object]) -> None:
+        values["wave_height_m"] = 1.2
+        values["wave_period_s"] = 8.0
+        values["wave_direction_deg"] = 270.0
+
+    result = engine.evaluate(
+        dataset_factory(per_hour=jetty_surge, count=48, spot_updates={"shore_type": "jetty"})
+    )
+    rip = result.hourly[0].field_feasibility.rip_current_potential
+    assert rip == PotentialLevel.HIGH

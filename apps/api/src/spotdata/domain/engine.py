@@ -1364,7 +1364,10 @@ class DecisionEngine:
         intersection = (
             breaking and long_period and angled and (channel_beach or hour.wave_height_m >= 1.2)
         )
-        if intersection:
+        # Safety floor: hours that the older additive score already rated HIGH stay
+        # HIGH, so the intersection rule can only ADD warnings, never remove the
+        # NO_GO path that depends on rip HIGH.
+        if intersection or rip_points >= 7:
             rip = PotentialLevel.HIGH
         elif rip_points >= 4:
             rip = PotentialLevel.MODERATE

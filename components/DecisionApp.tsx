@@ -41,6 +41,36 @@ function fingerprint(value: ForecastDecisionRequest): string {
   return JSON.stringify(value);
 }
 
+function VerdictStrip({
+  result,
+  loading,
+  spotName,
+  targetDate,
+}: {
+  result: DecisionApiResponse | null;
+  loading: boolean;
+  spotName: string;
+  targetDate: string;
+}) {
+  let tone = "pending";
+  let label = "لم يُحسب القرار بعد";
+  if (loading) label = "جارٍ حساب القرار…";
+  else if (result && "hourly" in result) {
+    tone = result.decision === "go" ? "go" : "no-go";
+    label = result.decision_label_ar;
+  } else if (result) {
+    tone = "no-go";
+    label = result.decision_label_ar;
+  }
+  return (
+    <section className={`verdict-strip verdict-${tone}`} aria-live="polite" data-testid="verdict-strip">
+      <span><small>البقعة</small><strong>{spotName}</strong></span>
+      <span><small>اليوم</small><bdi>{targetDate}</bdi></span>
+      <span className="verdict-label"><small>القرار</small><strong>{label}</strong></span>
+    </section>
+  );
+}
+
 export function DecisionApp() {
   const hydrated = useSyncExternalStore(subscribeToHydration, () => true, () => false);
   const [request, setRequest] = useState<ForecastDecisionRequest>(initialRequest);
@@ -179,6 +209,12 @@ export function DecisionApp() {
           <span><Server size={14} /> Gemini اختياري بمفتاحك</span>
         </div>
       </section>
+      <VerdictStrip
+        result={result}
+        loading={loading}
+        spotName={request.location.name ?? "البقعة المختارة"}
+        targetDate={request.target_date}
+      />
       <Planner
         value={request}
         loading={loading}

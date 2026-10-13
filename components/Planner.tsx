@@ -401,40 +401,9 @@ export function Planner({ value, loading, error, hasResult, isDirty, onChange, o
           </label>
         </section>
 
-        <section className="planner-step" aria-labelledby="species-step-title">
-          <div className="step-heading">
-            <span className="step-index">3</span>
-            <div>
-              <h3 id="species-step-title">شنوّة تصيد؟</h3>
-              <p>يضبط توقع النشاط والطعم. لا يفتح ساعة ممنوعة.</p>
-            </div>
-          </div>
-          <label>
-            <span className="field-caption">النوع المستهدف</span>
-            <select
-              aria-label="النوع المستهدف"
-              value={value.angler.target_species}
-              onChange={(event) =>
-                patch({
-                  angler: {
-                    ...valueRef.current.angler,
-                    target_species: event.target.value as ForecastDecisionRequest["angler"]["target_species"],
-                  },
-                })
-              }
-            >
-              <option value="general">صيد عام</option>
-              <option value="european_seabass">القاروص</option>
-              <option value="gilthead_seabream">الوراطة</option>
-              <option value="white_seabream">السار</option>
-              <option value="striped_seabream">المرمار</option>
-            </select>
-          </label>
-        </section>
-
         <section className="planner-step" aria-labelledby="orientation-step-title">
           <div className="step-heading">
-            <span className="step-index">4</span>
+            <span className="step-index">3</span>
             <div>
               <h3 id="orientation-step-title">اتجاه الشاطئ</h3>
               <p>نحسب أين البحر من الخريطة. إن تعذّر الحساب لن نقول «اذهب».</p>
@@ -558,6 +527,7 @@ export function Planner({ value, loading, error, hasResult, isDirty, onChange, o
           <strong>ما قدرناش نكمّلوا التحليل</strong>
           <span>{error}</span>
           <small>ثبّت اتصالك وعاود المحاولة. القرار السابق يبقى ظاهر إذا كان موجود.</small>
+          <button className="retry-action" type="button" disabled={loading} onClick={onSubmit}>عاود المحاولة</button>
         </div>
       )}
 

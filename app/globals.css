@@ -15,8 +15,8 @@
   :root {
     --ink: #eefaf7;
     --ink-soft: #cfe6e0;
-    --muted: #9dbab5;
-    --muted-2: #6f8f8a;
+    --muted: #b3cfca;
+    --muted-2: #94b5b0;
     --bg: #061719;
     --bg-deep: #020f11;
     --panel: #0b2427;
@@ -2361,4 +2361,42 @@
 .encyclopedia-engine {
   margin-top: 12px; padding: 10px 12px; border-radius: 12px;
   background: rgba(75, 231, 195, .08); color: var(--ink) !important;
+}
+
+@layer components {
+  /* Verdict strip: the decision is visible before the form */
+  .verdict-strip {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+    gap: 12px;
+    margin: 12px auto;
+    max-width: var(--container);
+    padding: 14px 18px;
+    border: 1px solid var(--line-strong);
+    border-radius: var(--radius);
+    background: var(--panel-2);
+  }
+  .verdict-strip > span { display: grid; gap: 2px; }
+  .verdict-strip small { color: var(--muted); }
+  .verdict-strip .verdict-label strong { font-size: 1.1rem; }
+  .verdict-go { border-color: var(--mint); }
+  .verdict-go .verdict-label strong { color: var(--mint-bright); }
+  .verdict-no-go { border-color: var(--red); }
+  .verdict-no-go .verdict-label strong { color: var(--red); }
+  .verdict-pending .verdict-label strong { color: var(--amber-soft); }
+}
+
+@layer components {
+  /* Touch targets of at least 44px on coarse pointers */
+  @media (pointer: coarse) {
+    button, summary, select, input[type="date"] { min-height: 44px; }
+  }
+}
+
+@layer components {
+  .planner-error .retry-action {
+    min-height: 44px; margin-top: 8px; padding: 0 16px; border-radius: 10px;
+    border: 1px solid var(--amber); color: var(--amber-soft); background: rgba(246, 176, 77, .1);
+    font-weight: 800; cursor: pointer;
+  }
 }

@@ -368,6 +368,22 @@ def test_inconsistent_wave_direction_reduces_confidence_and_warns(
     assert any(factor.code == "wave_direction_inconsistent" for factor in result.hourly[0].factors)
 
 
+def test_small_land_side_wave_does_not_trigger_direction_caution(
+    dataset_factory: Callable[..., ForecastDataset],
+) -> None:
+    # A 0.4 m wave from the land side is a normal small local wave under offshore
+    # wind; it must not turn every hour into caution or cap its confidence.
+    result = engine.evaluate(
+        dataset_factory(hour_updates={"wave_direction_deg": 270.0, "wave_height_m": 0.4})
+    )
+    assert all(
+        factor.code != "wave_direction_inconsistent"
+        for hour in result.hourly
+        for factor in hour.factors
+    )
+    assert all(hour.confidence.score > 55 for hour in result.hourly)
+
+
 def test_target_species_weights_are_small_and_explained(
     dataset_factory: Callable[..., ForecastDataset],
 ) -> None:
@@ -441,9 +457,10 @@ def test_previous_rain_and_persistent_onshore_energy_raise_transport_screen(
     assert midnight.derived.rain_24h_mm == 27.0
     assert midnight.derived.onshore_wind_fraction_12h == 1.0
     assert midnight.field_feasibility.fouling_transport_potential == PotentialLevel.HIGH
-    assert midnight.field_feasibility.rip_current_potential == PotentialLevel.MODERATE
+    # Hs 1.0 m + T 7 s + angled incidence on a channel-forming beach = intersection -> HIGH.
+    assert midnight.field_feasibility.rip_current_potential == PotentialLevel.HIGH
     assert midnight.safety == DecisionLevel.CAUTION
-    assert not any(factor.code == "elevated_rip_current_potential" for factor in midnight.factors)
+    assert any(factor.code == "elevated_rip_current_potential" for factor in midnight.factors)
     assert midnight.field_feasibility.confidence == 50
     assert midnight.field_feasibility.is_direct_observation is False
     assert any("ليس رصداً" in item for item in midnight.field_feasibility.limitations_ar)
@@ -1109,3 +1126,64 @@ def test_data_gaps_are_reported_per_field(
     )
     assert any("فارغ في 24 من 24 ساعة" in line for line in gappy.data_gaps_ar)
     assert all("غير متوفر، وليس صفراً" in line for line in gappy.data_gaps_ar)
+
+
+def test_rip_current_high_needs_intersection_not_a_sum(
+    dataset_factory: Callable[..., ForecastDataset],
+) -> None:
+    # A big single driver alone (tall but short-period, shore-parallel) must not be HIGH.
+    def only_height(index: int, values: dict[str, object]) -> None:
+        values["wave_height_m"] = 1.3
+        values["wave_period_s"] = 3.0
+        values["wave_direction_deg"] = 270.0
+
+    result = engine.evaluate(dataset_factory(per_hour=only_height, count=48))
+    assert result.hourly[0].field_feasibility.rip_current_potential != PotentialLevel.HIGH
+
+
+def test_rip_safety_floor_keeps_previously_high_hours_high(
+    dataset_factory: Callable[..., ForecastDataset],
+) -> None:
+    # Hs 1.2 m (+3), T 8 s (+2), jetty (+2) = 7 points, but waves run parallel to the
+    # coast, so the intersection fails. The older additive rule rated this HIGH;
+    # the safety floor must keep it HIGH.
+    def jetty_surge(index: int, values: dict[str, object]) -> None:
+        values["wave_height_m"] = 1.2
+        values["wave_period_s"] = 8.0
+        values["wave_direction_deg"] = 270.0
+
+    result = engine.evaluate(
+        dataset_factory(per_hour=jetty_surge, count=48, spot_updates={"shore_type": "jetty"})
+    )
+    rip = result.hourly[0].field_feasibility.rip_current_potential
+    assert rip == PotentialLevel.HIGH
+
+
+def test_rip_setup_advisory_is_info_only_and_does_not_change_decision(
+    dataset_factory: Callable[..., ForecastDataset],
+) -> None:
+    def near_normal(index: int, values: dict[str, object]) -> None:
+        values["wave_height_m"] = 1.0
+        values["wave_period_s"] = 9.0
+        values["wave_direction_deg"] = 90.0
+
+    base = engine.evaluate(dataset_factory(per_hour=near_normal, count=48))
+    advisory = [f for f in base.hourly[0].factors if f.code == "rip_setup_advisory"]
+    if base.hourly[0].field_feasibility.rip_current_potential != PotentialLevel.HIGH:
+        assert advisory
+        assert advisory[0].severity.value == "info"
+
+
+def test_user_bottom_type_adds_info_only_advisory(
+    dataset_factory: Callable[..., ForecastDataset],
+) -> None:
+    rock = engine.evaluate(
+        dataset_factory(
+            spot_updates={"bottom_type": "rock", "bottom_type_source": "user"}, count=48
+        )
+    )
+    plain = engine.evaluate(dataset_factory(count=48))
+    rock_factor = [f for f in rock.hourly[0].factors if f.code == "bottom_rock_snag_advisory"]
+    assert rock_factor and rock_factor[0].severity.value == "info"
+    assert rock.decision == plain.decision
+    assert not any(f.code == "bottom_rock_snag_advisory" for f in plain.hourly[0].factors)

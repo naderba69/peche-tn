@@ -6,6 +6,7 @@ from typing import Any, Literal
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 from .enums import (
+    BottomType,
     ConfidenceBand,
     DecisionLevel,
     DecisionReasonCode,
@@ -146,6 +147,10 @@ class SpotProfile(StrictModel):
     shore_type: ShoreType | None = None
     shore_type_source: Literal["user", "overpass", "unknown"] = "unknown"
     exposure: Exposure | None = None
+    # Seabed type entered by the user for this spot. None = unknown; the engine
+    # never infers it. Currently informational only (no decision rule uses it yet).
+    bottom_type: BottomType | None = None
+    bottom_type_source: Literal["user", "unknown"] = "unknown"
 
     @field_validator("seaward_orientation_deg")
     @classmethod

@@ -6,6 +6,7 @@ from itertools import pairwise
 from zoneinfo import ZoneInfo
 
 from .enums import (
+    BottomType,
     CatalogStatus,
     ConfidenceBand,
     DecisionLevel,
@@ -139,6 +140,19 @@ _SATELLITE_DECISION_MAX_AGE_HOURS = 72.0
 _SATELLITE_ARCHIVE_AGE_HOURS = 168.0
 _TUR_MODERATE_FNU = 2.0
 _TUR_HIGH_FNU = 5.0
+# A land-side wave is only a material data doubt when the wave itself is large
+# enough to matter at the shore. Small locally generated waves (offshore wind)
+# are normal on exposed coasts and must not turn every hour into caution.
+MATERIAL_LAND_SIDE_WAVE_M = 0.5
+
+
+def _land_side_wave_is_material(hour: object, incidence: WaveIncidence) -> bool:
+    if incidence != WaveIncidence.INCONSISTENT:
+        return False
+    height = getattr(hour, "wave_height_m", None)
+    return height is not None and height >= MATERIAL_LAND_SIDE_WAVE_M
+
+
 _MHW_MODERATE_ANOMALY_C = 2.0
 _MHW_STRONG_ANOMALY_C = 3.0
 # Monthly coastal SST climatology (°C) by Tunisian zone — Gabès/south run
@@ -1318,6 +1332,19 @@ class DecisionEngine:
         else:
             turbidity = PotentialLevel.UNKNOWN
 
+        # [C] Shoreline estimate, NOT calibrated: 0.7 m / 5 s / 1.2 m thresholds are
+        # site-dependent in the literature (see report section 10). Keep as estimate.
+        # Rip current = intersection of drivers, not a sum. HIGH needs all of:
+        #   A) breaking waves (Hs >= 0.7 m),
+        #   B) plunging long-period waves (T >= 5 s),
+        #   C) oblique or direct incidence (alongshore gradient),
+        # and a beach that forms channels (sandy/jetty) or very large surf (Hs >= 1.2 m).
+        # Partial overlap gives MODERATE from the older points score, so a single
+        # driver never turns the whole hour into HIGH.
+        breaking = hour.wave_height_m >= 0.7
+        long_period = hour.wave_period_s >= 5
+        angled = derived.wave_incidence in {WaveIncidence.DIRECT, WaveIncidence.OBLIQUE}
+        channel_beach = dataset.spot.shore_type in {ShoreType.SANDY, ShoreType.JETTY}
         rip_points = 0
         if hour.wave_height_m >= 1.2:
             rip_points += 3
@@ -1327,9 +1354,9 @@ class DecisionEngine:
             rip_points += 1
         if hour.wave_period_s >= 8:
             rip_points += 2
-        elif hour.wave_period_s >= 5:
+        elif long_period:
             rip_points += 1
-        if derived.wave_incidence in {WaveIncidence.DIRECT, WaveIncidence.OBLIQUE}:
+        if angled:
             rip_points += 1
         if dataset.spot.shore_type == ShoreType.JETTY:
             rip_points += 2
@@ -1337,7 +1364,18 @@ class DecisionEngine:
             rip_points += 1
         if energetic_48h:
             rip_points += 1
-        rip = _potential_level(rip_points, moderate_at=4, high_at=7)
+        intersection = (
+            breaking and long_period and angled and (channel_beach or hour.wave_height_m >= 1.2)
+        )
+        # Safety floor: hours that the older additive score already rated HIGH stay
+        # HIGH, so the intersection rule can only ADD warnings, never remove the
+        # NO_GO path that depends on rip HIGH.
+        if intersection or rip_points >= 7:
+            rip = PotentialLevel.HIGH
+        elif rip_points >= 4:
+            rip = PotentialLevel.MODERATE
+        else:
+            rip = PotentialLevel.LOW
 
         deductions = {
             PotentialLevel.LOW: 0,
@@ -1947,6 +1985,56 @@ class DecisionEngine:
                 )
             )
 
+        # INFO-only advisory [C]: near-normal long-period surf is cited in the literature
+        # as favouring rip currents. It never sets caution or changes the decision.
+        if (
+            field_feasibility.rip_current_potential != PotentialLevel.HIGH
+            and derived.wave_incidence == WaveIncidence.DIRECT
+            and hour.wave_height_m is not None
+            and hour.wave_period_s is not None
+            and hour.wave_height_m >= 1.0
+            and hour.wave_period_s >= 8
+        ):
+            factors.append(
+                _risk_factor(
+                    "rip_setup_advisory",
+                    "إرشاد: موج شبه عمودي وطويل الفترة",
+                    RiskSeverity.INFO,
+                    f"{hour.wave_height_m:.2f} م / {hour.wave_period_s:.0f} ث",
+                    "قد يرفع هذا احتمال التيار الساحب في شواطئ معينة؛ العتبة غير معايَرة لهذا الشاطئ، ولا تغيّر القرار.",
+                    basis=FactorBasis.DERIVED_FORECAST,
+                    rule_nature=RuleNature.OPERATIONAL_PROXY,
+                )
+            )
+
+        # INFO-only seabed advisories from the USER-entered bottom type. They never
+        # set caution or change the decision (see docs/FISHING-TRIP-REPORT-AR.md).
+        bottom = dataset.spot.bottom_type
+        if bottom == BottomType.ROCK:
+            factors.append(
+                _risk_factor(
+                    "bottom_rock_snag_advisory",
+                    "إرشاد: قاع صخري",
+                    RiskSeverity.INFO,
+                    "قاع صخري (مُدخل يدوياً)",
+                    "خطر علق الرصاص والخيط في الصخور؛ استعمل رصاصاً يسهل فكه وخيطاً أقوى.",
+                    basis=FactorBasis.DERIVED_FORECAST,
+                    rule_nature=RuleNature.OPERATIONAL_PROXY,
+                )
+            )
+        if bottom == BottomType.POSIDONIA:
+            factors.append(
+                _risk_factor(
+                    "bottom_posidonia_advisory",
+                    "إرشاد: قاع posidonia",
+                    RiskSeverity.INFO,
+                    "posidonia (مُدخل يدوياً)",
+                    "أعشاب وحطام قد تعلق بالطعم والخيط؛ الحطام يزيد بعد العواصف، وليس في ذروتها.",
+                    basis=FactorBasis.DERIVED_FORECAST,
+                    rule_nature=RuleNature.OPERATIONAL_PROXY,
+                )
+            )
+
         if field_feasibility.rip_current_potential == PotentialLevel.HIGH:
             has_caution = True
             factors.append(
@@ -1990,7 +2078,7 @@ class DecisionEngine:
                 )
             )
 
-        if derived.wave_incidence == WaveIncidence.INCONSISTENT:
+        if _land_side_wave_is_material(hour, derived.wave_incidence):
             factors.append(
                 Factor(
                     code="wave_direction_inconsistent",
@@ -2640,7 +2728,7 @@ class DecisionEngine:
         critical_missing = [name for name in CRITICAL_FIELDS if getattr(hour, name) is None]
         if critical_missing:
             score = min(score, 45)
-        if derived.wave_incidence == WaveIncidence.INCONSISTENT:
+        if _land_side_wave_is_material(hour, derived.wave_incidence):
             score = min(score, 55)
         # A station/model divergence is a snapshot near the fetch time, so it only
         # caps the confidence of hours close to the observation — the same ±2 h
@@ -2664,7 +2752,7 @@ class DecisionEngine:
             reasons.append("كل المتغيرات الأساسية والساندة متوفرة لهذه الساعة.")
         if dataset.spot.orientation_source.value in {"map", "estimated"}:
             reasons.append("اتجاه الشاطئ تقديري ويؤثر في تصنيف الرياح والموج.")
-        if derived.wave_incidence == WaveIncidence.INCONSISTENT:
+        if _land_side_wave_is_material(hour, derived.wave_incidence):
             reasons.append("اتجاه الموج غير متسق مع اتجاه البحر في البقعة.")
         if station_divergence_applies:
             reasons.append(
@@ -2692,7 +2780,7 @@ class DecisionEngine:
                 source_quality=source_quality,
                 orientation_quality=orientation_quality,
                 critical_missing=[_FIELD_LABELS_AR[name] for name in critical_missing],
-                wave_inconsistent=derived.wave_incidence == WaveIncidence.INCONSISTENT,
+                wave_inconsistent=_land_side_wave_is_material(hour, derived.wave_incidence),
                 station_divergence=station_divergence_applies,
             ),
         )
@@ -2939,12 +3027,33 @@ class DecisionEngine:
             for item in covered
             if item.forecast.wind_speed_kmh is not None
         ]
+        # Model current projected along the coast, km/h -> m/s (worst covered hour).
+        along_values = [
+            abs(item.derived.current_alongshore_kmh) / 3.6
+            for item in covered
+            if item.derived.current_alongshore_kmh is not None
+        ]
+        longshore_current_ms = max(along_values) if along_values else None
+        # Bottom load: the worst covered hour at the shallow reference depth
+        # (conservative; the lead must hold where the bottom moves most).
+        orbital_values = [
+            velocity
+            for velocity in (
+                near_bottom_orbital_velocity_ms(
+                    item.forecast.wave_height_m, item.forecast.wave_period_s, 1.5
+                )
+                for item in covered
+            )
+            if velocity is not None
+        ]
         return recommend_gear(
             holding=field_feasibility.holding_difficulty,
             breakdown=field_feasibility.holding_breakdown,
             fouling=field_feasibility.fouling_transport_potential,
             wave_height_m=max(wave_values) if wave_values else None,
             wind_speed_kmh=max(wind_values) if wind_values else None,
+            orbital_velocity_ms=max(orbital_values) if orbital_values else None,
+            longshore_current_ms=longshore_current_ms,
         )
 
     def _fouling_evidence(

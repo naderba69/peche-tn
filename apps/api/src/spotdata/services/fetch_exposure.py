@@ -16,6 +16,9 @@ from __future__ import annotations
 import math
 from collections.abc import Iterable, Sequence
 from dataclasses import dataclass
+from datetime import datetime
+
+from spotdata.domain.models import WaveFetchDiagnostic, WaveFetchSample
 
 EARTH_RADIUS_M = 6_371_008.8
 MIN_RAY_START_M = 5.0  # ignore the spot's own coastline when the spot sits on it
@@ -126,3 +129,58 @@ def fetch_toward_wave_source(
     if abs(_signed_difference(best.bearing_deg, wave_from_deg)) > max_bearing_gap_deg:
         return None
     return best
+
+
+def build_wave_fetch_diagnostic(
+    *,
+    latitude: float,
+    longitude: float,
+    seaward_deg: float | None,
+    segments: Sequence[tuple[tuple[float, float], tuple[float, float]]] | None,
+    search_radius_m: float,
+    hourly_wave_from: Sequence[tuple[datetime, float | None]],
+) -> WaveFetchDiagnostic:
+    radius_km = round(search_radius_m / 1000.0, 1)
+    if seaward_deg is None or not segments:
+        return WaveFetchDiagnostic(
+            status="unavailable",
+            seaward_orientation_deg=seaward_deg,
+            search_radius_km=radius_km,
+            reasons_ar=[
+                "لم تُجلب هندسة الساحل الواسعة أو لم يُعرف اتجاه البحر؛ التشخيص غير متاح ولا يغيّر القرار."
+            ],
+        )
+    rays = fetch_profile(
+        latitude=latitude,
+        longitude=longitude,
+        seaward_deg=seaward_deg,
+        coastline_segments=segments,
+        search_radius_m=search_radius_m,
+    )
+    samples: list[WaveFetchSample] = []
+    for time, wave_from in hourly_wave_from:
+        if wave_from is None:
+            continue
+        ray = fetch_toward_wave_source(rays, wave_from)
+        samples.append(
+            WaveFetchSample(
+                time=time,
+                wave_from_deg=round(wave_from % 360.0, 1),
+                fetch_km=round(ray.fetch_m / 1000.0, 1) if ray is not None else None,
+                hit_coastline=ray.hit_coastline if ray is not None else None,
+                in_seaward_sector=ray is not None,
+            )
+        )
+    reasons = [
+        "تشخيص فقط: المسافة المفتوحة للماء من الساحل المحسوب في اتجاه مصدر الموج. لا تغيّر القرار ولا الثقة ولا النوافذ.",
+        f"حدود البحث {radius_km:g} كم؛ إن لم يقطع الشعاع أي ساحل داخل الحد فالقيمة «على الأقل» وليست مسافة مؤكدة.",
+    ]
+    if not samples:
+        reasons.append("لا توجد اتجاهات موج في ساعات التوقع.")
+    return WaveFetchDiagnostic(
+        status="resolved",
+        seaward_orientation_deg=round(seaward_deg, 1) % 360.0,
+        search_radius_km=radius_km,
+        samples=samples,
+        reasons_ar=reasons,
+    )

@@ -938,6 +938,28 @@ class DecisionPreflightNoGo(StrictModel):
         return value
 
 
+class WaveFetchSample(StrictModel):
+    time: datetime
+    wave_from_deg: float = Field(ge=0, le=360)
+    fetch_km: float | None = Field(default=None, ge=0)
+    hit_coastline: bool | None = None
+    in_seaward_sector: bool
+
+
+class WaveFetchDiagnostic(StrictModel):
+    """Diagnostic only: open-water distance toward the forecast wave source.
+
+    It never changes the decision, confidence or windows. Fetch values are geometry
+    from OSM coastline and are not a wave measurement.
+    """
+
+    status: Literal["resolved", "unavailable"]
+    seaward_orientation_deg: float | None = Field(default=None, ge=0, lt=360)
+    search_radius_km: float = Field(ge=0)
+    samples: list[WaveFetchSample] = Field(default_factory=list)
+    reasons_ar: list[str] = Field(default_factory=list)
+
+
 class DecisionResponse(StrictModel):
     schema_version: Literal["3.20"] = SCHEMA_VERSION
     engine_version: str
@@ -975,6 +997,7 @@ class DecisionResponse(StrictModel):
     cache_fallback_age_seconds: float | None = Field(default=None, ge=0)
     spot_profile: SpotProfile | None = None
     automated_shore_profile: AutomatedShoreProfile | None = None
+    wave_fetch_diagnostic: WaveFetchDiagnostic | None = None
     observation_comparison: ObservationComparison
     factor_coverage: FactorCoverageSummary
     factor_assessments: list[FactorAssessment]

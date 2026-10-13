@@ -443,6 +443,44 @@ export function DecisionResult({ result, request, stale = false }: DecisionResul
         <div className="not-probability"><Info size={15} /> {result.decision === "go" ? "الترتيب النسبي لا يغيّر اذهب. الساعات الممنوعة تبقى ممنوعة." : result.decision === "caution" ? "حذر: الساعات المعروضة مفتوحة بتحذير، ولا ترتيب نسبي يلغيه." : "لا تذهب بسبب مانع محسوب. لا ترتيب يفتح اليوم."}</div>
       </header>
 
+      {result.wave_fetch_diagnostic && (
+        <details className="wave-fetch-diagnostic" data-testid="wave-fetch-diagnostic">
+          <summary>
+            <strong>تشخيص اتجاه الموج والمسافة البحرية</strong> — لا يغيّر القرار ولا الثقة
+          </summary>
+          {result.wave_fetch_diagnostic.status === "unavailable" ? (
+            <p>{result.wave_fetch_diagnostic.reasons_ar[0]}</p>
+          ) : (
+            <>
+              <p>
+                اتجاه البحر المحسوب: <bdi>{result.wave_fetch_diagnostic.seaward_orientation_deg}°</bdi>.
+                كل ساعة تعرض اتجاه الموج من النموذج والمسافة المفتوحة للماء في ذلك الاتجاه.
+              </p>
+              <ul>
+                {result.wave_fetch_diagnostic.samples.map((sample) => (
+                  <li key={sample.time}>
+                    <bdi>
+                      {new Date(sample.time).toLocaleTimeString("ar-TN", {
+                        hour: "2-digit",
+                        minute: "2-digit",
+                        timeZone: "Africa/Tunis",
+                      })}
+                    </bdi>{" "}
+                    الموج من <bdi>{sample.wave_from_deg}°</bdi> ·{" "}
+                    {sample.fetch_km === null
+                      ? "خارج واجهة البحر المحسوبة (من جهة اليابسة)"
+                      : `مسافة مفتوحة ${sample.fetch_km} كم${sample.hit_coastline ? "" : " (على الأقل)"}`}
+                  </li>
+                ))}
+              </ul>
+              {result.wave_fetch_diagnostic.reasons_ar.slice(1).map((reason) => (
+                <p key={reason}>{reason}</p>
+              ))}
+            </>
+          )}
+        </details>
+      )}
+
       <MiniReport result={result} />
 
       <TripBlockers

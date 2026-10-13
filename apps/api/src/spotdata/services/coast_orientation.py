@@ -378,6 +378,60 @@ class CoastOrientationClient:
             ttl_seconds=24 * 60 * 60,
             max_entries=256,
         )
+        self.segment_cache: AsyncTTLCache[
+            tuple[float, float, int],
+            tuple[tuple[tuple[float, float], tuple[float, float]], ...] | None,
+        ] = AsyncTTLCache(ttl_seconds=24 * 60 * 60, max_entries=64)
+
+    async def coastline_segments(
+        self, latitude: float, longitude: float, radius_m: int
+    ) -> tuple[tuple[tuple[float, float], tuple[float, float]], ...] | None:
+        """Wide coastline geometry for fetch exposure. None when unavailable."""
+        key = (round(latitude, 4), round(longitude, 4), radius_m)
+        cached = await self.segment_cache.get_or_create(
+            key, lambda: self._coastline_uncached(latitude, longitude, radius_m)
+        )
+        if cached is None:
+            await self.segment_cache.delete(key)
+        return cached
+
+    async def _coastline_uncached(
+        self, latitude: float, longitude: float, radius_m: int
+    ) -> tuple[tuple[tuple[float, float], tuple[float, float]], ...] | None:
+        query = (
+            "[out:json][timeout:20];"
+            f'way(around:{radius_m},{latitude},{longitude})["natural"="coastline"];'
+            "out geom;"
+        )
+        for server in self._servers:
+            try:
+                async with asyncio.timeout(25):
+                    response = await self._http_client.get(
+                        server,
+                        params={"data": query},
+                        timeout=20.0,
+                        headers={"Accept": "application/json"},
+                    )
+                response.raise_for_status()
+                payload: Any = response.json()
+                elements = payload.get("elements") if isinstance(payload, dict) else None
+                if not isinstance(elements, list):
+                    continue
+                segments: list[tuple[tuple[float, float], tuple[float, float]]] = []
+                for element in elements:
+                    geometry = _valid_geometry(element)
+                    segments.extend(
+                        (start, end) for start, end in pairwise(geometry) if start != end
+                    )
+                if segments:
+                    return tuple(segments)
+            except (httpx.HTTPError, ValueError, TypeError, TimeoutError) as exc:
+                LOGGER.warning(
+                    "Overpass coastline fetch failed server=%s type=%s",
+                    server,
+                    type(exc).__name__,
+                )
+        return None
 
     async def resolve(self, latitude: float, longitude: float) -> AutoOrientationResponse:
         key = (round(latitude, 5), round(longitude, 5))

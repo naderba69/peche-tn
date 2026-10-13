@@ -40,9 +40,11 @@ from spotdata.domain.models import (
     SourceMetadata,
     SpotCandidate,
     SpotProfile,
+    WaveFetchDiagnostic,
 )
 from spotdata.services.coast_orientation import CoastOrientationClient
 from spotdata.services.copernicus_water import CopernicusWaterClient, unavailable_water_context
+from spotdata.services.fetch_exposure import build_wave_fetch_diagnostic
 from spotdata.services.gemini import GeminiClient, GeminiServiceError
 from spotdata.services.open_meteo import OpenMeteoClient, UpstreamDataError
 
@@ -302,6 +304,36 @@ async def generate_gemini_report(
         ) from exc
 
 
+FETCH_SEARCH_RADIUS_M = 30_000
+
+
+async def _wave_fetch_diagnostic(
+    coast_client: CoastOrientationClient,
+    payload: ForecastDecisionRequest,
+    decision: DecisionResponse,
+) -> WaveFetchDiagnostic:
+    """Diagnostic attached after the decision. Failure here never affects the decision."""
+    try:
+        segments = await coast_client.coastline_segments(
+            payload.location.latitude,
+            payload.location.longitude,
+            FETCH_SEARCH_RADIUS_M,
+        )
+    except Exception as exc:  # diagnostic only: never break the decision
+        LOGGER.warning("wave fetch diagnostic skipped: %s", type(exc).__name__)
+        segments = None
+    return build_wave_fetch_diagnostic(
+        latitude=payload.location.latitude,
+        longitude=payload.location.longitude,
+        seaward_deg=payload.spot.seaward_orientation_deg,
+        segments=segments,
+        search_radius_m=FETCH_SEARCH_RADIUS_M,
+        hourly_wave_from=[
+            (hour.time, hour.forecast.wave_direction_deg) for hour in decision.hourly
+        ],
+    )
+
+
 @router.post(
     "/v1/decisions/forecast",
     response_model=DecisionResponse | DecisionPreflightNoGo,
@@ -440,10 +472,12 @@ async def forecast_decision(
             update={"coastal_water_context": water_context, "sources": sources}
         )
         decision = engine.evaluate(dataset)
+        wave_fetch = await _wave_fetch_diagnostic(coast_client, verified_payload, decision)
         return decision.model_copy(
             update={
                 "spot_profile": verified_spot,
                 "automated_shore_profile": shore_profile,
+                "wave_fetch_diagnostic": wave_fetch,
             }
         )
     except UpstreamDataError as exc:

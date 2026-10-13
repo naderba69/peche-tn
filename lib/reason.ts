@@ -73,10 +73,6 @@ export function buildPrimaryReason(result: DecisionResponse): string {
       return "رمز قديم غير مستخدم؛ البلاغات الميدانية ورمية الاختبار لا تدخل في القرار الحالي.";
     case "fouling_proxy_risk":
       return "إشارة CHL حديثة مع بروكسي نقل نموذجي مرتفع؛ خطر صوفة محتمل احترازياً، لا تأكيد ميداني.";
-    case "official_warning":
-      return "تحذير رسمي ساري يمنع التوصية بالخروج.";
-    case "official_warning_unverified":
-      return "لا تذهب: لم ينجح التحقق الآلي من حداثة نشرة INM ونطاق تغطيتها؛ الفحص اليدوي لا يحل محل شرط التطبيق.";
     case "forecast_horizon_exceeded":
       return "الفترة المطلوبة خارج أفق التوقع التشغيلي البالغ 72 ساعة؛ لا يصدر النظام GO خارج هذا النطاق.";
     case "stale_forecast_data":

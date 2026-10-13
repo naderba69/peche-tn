@@ -15,7 +15,6 @@ from .enums import (
     FactorImpact,
     FieldFeasibilityLevel,
     ForceMajeureKind,
-    InmCheckStatus,
     ObservationMatchStatus,
     PotentialLevel,
     RiskSeverity,
@@ -45,7 +44,6 @@ from .math import (
     dominant_wind_direction_deg,
     gust_factor,
     in_gabes_zone,
-    tunisian_regime,
     incoming_direction_components,
     incoming_direction_signed_components,
     kmh_to_mps,
@@ -60,6 +58,7 @@ from .math import (
     solar_elevation_deg,
     solar_twilight_times,
     tide_states,
+    tunisian_regime,
     tunisian_zone,
     wave_energy_proxy,
     weighted_directional_coherence,
@@ -82,7 +81,6 @@ from .models import (
     HoldingBreakdown,
     HourActivity,
     HourDecision,
-    InmWarningAudit,
     ObservationComparison,
     PeriodActivity,
     RankedSpot,
@@ -353,7 +351,7 @@ def _species_hour_activity(
         )
     del lunar_day_delta  # folk calendar excluded from the score
     del moon_illumination, target_species  # moonlight is astronomy, not feeding
-    # Pressure tendency is weather context only (catalog 1.8–1.10): never a catch weight.
+    # Pressure tendency is weather context only (catalog 1.8-1.10): never a catch weight.
     return max(0, min(100, score)), contributions
 
 
@@ -459,7 +457,9 @@ def _activity_basis_ar(profile: SpeciesProfile) -> list[str]:
         "مؤشر نشاط نسبي (0-100) يبدأ من 50: نافذة تغذية فلكية، حرارة الماء، توفر موسمي من دراسات (ليس ذروة تبييض)، توافق القاع، حالة بحر مناسبة للنوع. الضغط والقمر الشعبي خارج التنقيط. في خليج قابس فقط يُحتسب طور المد الساعي.",
     ]
     if profile.label_ar == "صيد عام":
-        lines.append("صيد عام بلا ملف موسمي أو حراري أو قاع: تعديل نشاط الشفق/الليل فقط، لا يغيّر اذهب/لا تذهب.")
+        lines.append(
+            "صيد عام بلا ملف موسمي أو حراري أو قاع: تعديل نشاط الشفق/الليل فقط، لا يغيّر اذهب/لا تذهب."
+        )
     lines.append(
         "ترتيب نسبي وليس احتمالاً ولا وعداً بالمصيد. المعايرة تحتاج سجل حصص تونسي يشمل الأصفار."
     )
@@ -625,7 +625,6 @@ class DecisionEngine:
             "مؤشرات جرّ الخط ونقل الأعشاب أو الحطام والعكارة والتيار الساحبي فحص احتمالي منخفض الثقة، وليست رصداً لحالة البقعة أو قياس NTU.",
             "بروكسي النقل وحده تنبيه لا يمنع؛ الاستثناء الاحترازي هو CHL كثيف حديث (≤48 ساعة) مع نقل مرتفع، ويظل خطراً غير مؤكد ميدانياً.",
             "حدود السلامة سياسة محافظة قابلة للمعايرة وليست بديلاً عن نشرات الحماية المدنية والحرس البحري أو تقديرك الميداني.",
-            "GO النهائي يتطلب تحققاً آلياً حديثاً من صفحة BMS الرسمية لـINM وتغطية السواحل التونسية؛ التعذر أو تعارض محتوى النشرة يبقى NO_GO، ولا يستبدله إقرار يدوي.",
             "البلاغات الميدانية ورمية الاختبار وإشارات التحذير التي يدخلها المستخدم لا تدخل في هذا القرار.",
             "مدة التحليل ثابتة 24 ساعة. عند غياب نوع ساحل من OSM واختيار المستخدم، يُعرض تحليل الطقس لكن يبقى القرار NO_GO؛ وتُستخدم أكثر عتبة موج محافظة دون تخمين النوع. اختيار المستخدم يُوسم منفصلاً ولا يُعرض كرصد OSM.",
             "كل القيم الجوية والبحرية الساعية القادمة من Open-Meteo توقعات نموذجية؛ رصد METAR منفصل وفي محطة مطار لا داخل البقعة.",
@@ -687,61 +686,10 @@ class DecisionEngine:
         response.fisherman_report = build_fisherman_report(dataset, response)
         return response
 
-    def apply_official_warning_check(
-        self,
-        dataset: ForecastDataset,
-        decision: DecisionResponse,
-        audit: InmWarningAudit,
-    ) -> DecisionResponse:
-        """Apply the INM AND-gate without discarding the computed forecast report."""
-        if decision.decision != DecisionLevel.GO or audit.status == InmCheckStatus.VERIFIED_CLEAR:
-            return decision.model_copy(update={"official_warning_check": audit})
-
-        active_warning = audit.status == InmCheckStatus.WARNING_ACTIVE
-        reason = (
-            DecisionReasonCode.OFFICIAL_WARNING
-            if active_warning
-            else DecisionReasonCode.OFFICIAL_WARNING_UNVERIFIED
-        )
-        summary = (
-            "الحالة النهائية: لا تذهب. اجتازت بيانات الطقس والتنفيذ الفحص المبدئي، "
-            "لكن نشرة INM تتضمن تحذيراً سارياً يغطي وقت الخروج."
-            if active_warning
-            else "الحالة النهائية: لا تذهب. اجتازت بيانات الطقس والتنفيذ الفحص المبدئي، "
-            "لكن تعذر إثبات خلو نشرة INM الحديثة ونطاق تغطيتها؛ لا يُستبدل ذلك بفحص يدوي."
-        )
-        limitations = list(decision.limitations_ar)
-        limitations.append(audit.explanation_ar)
-        gated = decision.model_copy(
-            update={
-                "decision": DecisionLevel.NO_GO,
-                "decision_reason_code": reason,
-                "decision_label_ar": "لا تذهب",
-                "summary_ar": summary,
-                "recommended_windows": [],
-                "gear_recommendation": None,
-                "force_majeure_kind": _force_majeure_for(reason),
-                "official_warning_check": audit,
-                "limitations_ar": _unique(limitations),
-                "factor_assessments": self._factor_assessments(
-                    dataset,
-                    decision.hourly,
-                    decision.field_feasibility,
-                    DecisionLevel.NO_GO,
-                    reason,
-                ),
-                "fisherman_report": None,
-            }
-        )
-        gated.fisherman_report = build_fisherman_report(dataset, gated)
-        return gated
-
     def rank_spots(
         self,
         datasets: list[tuple[SpotCandidate, ForecastDataset | None]],
         target_date: date,
-        *,
-        official_warning_check: InmWarningAudit | None = None,
     ) -> RankSpotsResponse:
         """Evaluate several spots and rank them best-to-weakest (D13).
 
@@ -779,12 +727,6 @@ class DecisionEngine:
                 continue
             try:
                 result = self.evaluate(dataset)
-                if official_warning_check is not None and result.decision == DecisionLevel.GO:
-                    result = self.apply_official_warning_check(
-                        dataset,
-                        result,
-                        official_warning_check,
-                    )
             except InsufficientDataError:
                 ranked.append(error_entry(candidate, "لا توجد ساعات كافية في التاريخ المطلوب."))
                 continue
@@ -845,7 +787,6 @@ class DecisionEngine:
             target_date=target_date,
             generated_at=datetime.now(timezone),
             ranked=ranked,
-            official_warning_check=official_warning_check,
             notes_ar=[
                 "الترتيب: بقع اذهب أولاً ثم لا تذهب. داخل كل مجموعة التنفيذ ثم الترتيب النسبي — لا يفتح بقعة ممنوعة.",
                 "مؤشر الفرصة ترتيب نسبي وليس احتمال مصيد؛ ومعطيات كل بقعة نماذج أفقية نحو 8 كم وتحتاج معاينة ميدانية قبل القرار.",
@@ -2861,14 +2802,14 @@ class DecisionEngine:
                 ):
                     return DecisionLevel.NO_GO, DecisionReasonCode.STALE_FORECAST_DATA
                 return DecisionLevel.NO_GO, DecisionReasonCode.CRITICAL_DATA_MISSING
+            if any(item.safety == DecisionLevel.NO_GO for item in hourly):
+                return DecisionLevel.NO_GO, DecisionReasonCode.SAFETY_HAZARD
             if any(
                 item.field_feasibility.holding_difficulty == PotentialLevel.HIGH
                 or item.field_feasibility.turbidity_potential == PotentialLevel.HIGH
                 for item in hourly
             ):
                 return DecisionLevel.NO_GO, DecisionReasonCode.FIELD_INFEASIBLE
-            if any(item.safety == DecisionLevel.NO_GO for item in hourly):
-                return DecisionLevel.NO_GO, DecisionReasonCode.SAFETY_HAZARD
             return DecisionLevel.NO_GO, DecisionReasonCode.CONSERVATIVE_UNCERTAINTY
 
         # The product has one binary headline. A caution-only set of windows is not
@@ -2889,10 +2830,10 @@ class DecisionEngine:
             return DecisionLevel.NO_GO, DecisionReasonCode.FIELD_INFEASIBLE
         if field_feasibility.turbidity_potential == PotentialLevel.HIGH:
             return DecisionLevel.NO_GO, DecisionReasonCode.FIELD_INFEASIBLE
-        if field_feasibility.status == FieldFeasibilityLevel.DIFFICULT and (
-            field_feasibility.rip_current_potential == PotentialLevel.HIGH
-            or field_feasibility.holding_difficulty == PotentialLevel.HIGH
-            or field_feasibility.turbidity_potential == PotentialLevel.HIGH
+        # Holding and turbidity HIGH already returned above, so only rip current remains.
+        if (
+            field_feasibility.status == FieldFeasibilityLevel.DIFFICULT
+            and field_feasibility.rip_current_potential == PotentialLevel.HIGH
         ):
             return DecisionLevel.NO_GO, DecisionReasonCode.FIELD_INFEASIBLE
         if confidence.score < 50:
@@ -3019,9 +2960,11 @@ class DecisionEngine:
                 notes.append(
                     f"إشارة CHL-a بعمر {age_hours:.0f} ساعة تجاوزت حد الحداثة {_CHL_FORCE_MAJEURE_MAX_AGE_HOURS:.0f} ساعة؛ لا تدخل سلم المنع."
                 )
-            elif chl is not None and chl >= _chl_bloom_thresholds(
-                dataset.location.latitude, dataset.location.longitude
-            )[1]:
+            elif (
+                chl is not None
+                and chl
+                >= _chl_bloom_thresholds(dataset.location.latitude, dataset.location.longitude)[1]
+            ):
                 if fouling == PotentialLevel.HIGH:
                     level = max(level, 4)
                     satellite_proxy_force_majeure = True
@@ -3033,9 +2976,11 @@ class DecisionEngine:
                     basis.append(
                         f"إشارة CHL-a مرتفعة حديثة ({chl:.1f} mg/m³) لكن بروكسي النقل غير مرتفع؛ يلزم تحقق ميداني."
                     )
-            elif chl is not None and chl >= _chl_bloom_thresholds(
-                dataset.location.latitude, dataset.location.longitude
-            )[0]:
+            elif (
+                chl is not None
+                and chl
+                >= _chl_bloom_thresholds(dataset.location.latitude, dataset.location.longitude)[0]
+            ):
                 level = max(level, 3)
                 basis.append(
                     f"إشارة CHL-a حديثة متوسطة ({chl:.1f} mg/m³)؛ تنبيه غير مؤكد لا دليل قاهر."
@@ -3914,7 +3859,7 @@ class DecisionEngine:
                 entries.append((activity, contributions))
             basis = [
                 *_activity_basis_ar(profile),
-                f"المد: {spring_neap.folk_label_ar} — خارج قابس بلا وزن؛ في قابس المد الصاعد +3 والجزر −3 ساعياً.",
+                f"المد: {spring_neap.folk_label_ar} — خارج قابس بلا وزن؛ في قابس المد الصاعد +3 والجزر -3 ساعياً.",
                 f"إضاءة القمر {illumination:.0%} — تُحتسب ليلاً للقاروص فقط (+2)، لا قاعدة سولونار.",
             ]
             activities.append(
@@ -4622,8 +4567,6 @@ class DecisionEngine:
             DecisionReasonCode.SAFE_WINDOW: "نافذة اجتازت الحدود الآلية وقابلة للتنفيذ مبدئياً",
             DecisionReasonCode.FOULING_CONFIRMED: "رمز قديم غير مستخدم؛ الإفادات الميدانية والرمية اليدوية لا تدخل في القرار الحالي",
             DecisionReasonCode.FOULING_PROXY_RISK: "إشارة CHL حديثة مع نقل نموذجي مرتفع؛ خطر صوفة محتمل غير مؤكد ميدانياً",
-            DecisionReasonCode.OFFICIAL_WARNING: "تحذير رسمي ساري يمنع التوصية بالخروج",
-            DecisionReasonCode.OFFICIAL_WARNING_UNVERIFIED: "تعذر التحقق آلياً من حداثة تحذير INM ونطاق تغطيته",
             DecisionReasonCode.TRIP_RUIN_CONFIRMED: "عامل مُفسِد مؤكد (قناديل/حطام/تعكر كثيف) يجعل الخرجة غير مجدية",
             DecisionReasonCode.FORECAST_HORIZON_EXCEEDED: "الفترة المطلوبة تتجاوز أفق التوقع التشغيلي 72 ساعة",
             DecisionReasonCode.STALE_FORECAST_DATA: "تعذر جلب توقع حديث؛ بيانات الكاش القديمة لا تسمح بإصدار GO",
@@ -5200,10 +5143,7 @@ def _worst_field_feasibility(
 
 
 def _force_majeure_for(reason_code: DecisionReasonCode) -> ForceMajeureKind:
-    """Map the reason code to the single hard blocker behind the decision.
-
-    access_legal carries the official marine warning (INM bulletin, D14).
-    """
+    """Map the reason code to the single hard blocker behind the decision."""
     return {
         DecisionReasonCode.SAFE_WINDOW: ForceMajeureKind.NONE,
         DecisionReasonCode.SAFETY_HAZARD: ForceMajeureKind.SAFETY,
@@ -5212,8 +5152,6 @@ def _force_majeure_for(reason_code: DecisionReasonCode) -> ForceMajeureKind:
         DecisionReasonCode.CONSERVATIVE_UNCERTAINTY: ForceMajeureKind.DATA,
         DecisionReasonCode.FOULING_CONFIRMED: ForceMajeureKind.FOULING,
         DecisionReasonCode.FOULING_PROXY_RISK: ForceMajeureKind.FOULING,
-        DecisionReasonCode.OFFICIAL_WARNING: ForceMajeureKind.ACCESS_LEGAL,
-        DecisionReasonCode.OFFICIAL_WARNING_UNVERIFIED: ForceMajeureKind.DATA,
         DecisionReasonCode.TRIP_RUIN_CONFIRMED: ForceMajeureKind.TRIP_RUIN,
         DecisionReasonCode.FORECAST_HORIZON_EXCEEDED: ForceMajeureKind.DATA,
         DecisionReasonCode.STALE_FORECAST_DATA: ForceMajeureKind.DATA,

@@ -11,7 +11,6 @@ from spotdata.domain.enums import (
     FactorBasis,
     FactorImpact,
     FieldFeasibilityLevel,
-    InmCheckStatus,
     PotentialLevel,
     RuleNature,
     TideState,
@@ -19,7 +18,6 @@ from spotdata.domain.enums import (
 from spotdata.domain.models import (
     CoastalWaterContext,
     ForecastDataset,
-    InmWarningAudit,
     SourceMetadata,
 )
 
@@ -80,76 +78,6 @@ def test_good_day_returns_ranked_explainable_window(
         "unknown",
         "excluded",
     }
-
-
-def test_inm_gate_blocks_preliminary_go_when_clear_status_is_unverified(
-    dataset_factory: Callable[..., ForecastDataset],
-) -> None:
-    dataset = dataset_factory()
-    preliminary = engine.evaluate(dataset)
-    assert preliminary.decision == DecisionLevel.GO
-    now = dataset.fetched_at
-    unverified = InmWarningAudit(
-        status=InmCheckStatus.UNVERIFIED,
-        checked_at=now,
-        coverage_status="unknown",
-        coverage_ar="غير معروف",
-        reason_code="source_conflict",
-        explanation_ar="تعارض مصدري اختباري.",
-    )
-    gated = engine.apply_official_warning_check(dataset, preliminary, unverified)
-    assert gated.decision == DecisionLevel.NO_GO
-    assert gated.decision_reason_code == DecisionReasonCode.OFFICIAL_WARNING_UNVERIFIED
-    assert gated.recommended_windows == []
-    assert gated.gear_recommendation is None
-    assert gated.official_warning_check == unverified
-    assert "تعذر إثبات خلو نشرة INM" in gated.summary_ar
-
-
-def test_verified_clear_inm_check_preserves_weather_go(
-    dataset_factory: Callable[..., ForecastDataset],
-) -> None:
-    dataset = dataset_factory()
-    preliminary = engine.evaluate(dataset)
-    audit = InmWarningAudit(
-        status=InmCheckStatus.VERIFIED_CLEAR,
-        checked_at=dataset.fetched_at,
-        http_status_code=200,
-        server_date=dataset.fetched_at,
-        response_age_seconds=0,
-        cache_control="no-cache",
-        age_header_seconds=0,
-        response_sha256="b" * 64,
-        coverage_status="verified_tunisian_coasts",
-        coverage_ar="تغطية وطنية اختباريّة",
-        reason_code="explicit_clear",
-        explanation_ar="لا يوجد تحذير في اختبار الوحدة.",
-    )
-    final = engine.apply_official_warning_check(dataset, preliminary, audit)
-    assert final.decision == DecisionLevel.GO
-    assert final.decision_reason_code == DecisionReasonCode.SAFE_WINDOW
-    assert final.recommended_windows
-    assert final.official_warning_check == audit
-
-
-def test_weather_no_go_remains_no_go_without_requiring_inm_override(
-    dataset_factory: Callable[..., ForecastDataset],
-) -> None:
-    dataset = dataset_factory(hour_updates={"wind_speed_kmh": 60.0, "wind_gust_kmh": 75.0})
-    preliminary = engine.evaluate(dataset)
-    assert preliminary.decision == DecisionLevel.NO_GO
-    audit = InmWarningAudit(
-        status=InmCheckStatus.NOT_CHECKED,
-        checked_at=dataset.fetched_at,
-        coverage_status="not_checked",
-        coverage_ar="لم يُطلب الفحص.",
-        reason_code="no_candidate_window",
-        explanation_ar="فشل حاجز الطقس أولاً.",
-    )
-    final = engine.apply_official_warning_check(dataset, preliminary, audit)
-    assert final.decision == DecisionLevel.NO_GO
-    assert final.decision_reason_code == preliminary.decision_reason_code
-    assert final.official_warning_check == audit
 
 
 def test_engine_exposes_auditable_shore_relative_direction_components(
@@ -388,7 +316,10 @@ def test_morning_blockers_do_not_veto_clear_evening(
     assert result.avoid_windows
     assert any(window.safety == DecisionLevel.NO_GO for window in result.avoid_windows)
     assert result.recommended_windows
-    assert all(window.end <= result.avoid_windows[0].start or window.start >= result.avoid_windows[0].end for window in result.recommended_windows)
+    assert all(
+        window.end <= result.avoid_windows[0].start or window.start >= result.avoid_windows[0].end
+        for window in result.recommended_windows
+    )
 
 
 def test_localized_thunder_is_avoided_while_high_turbidity_proxy_stays_caution_only(
@@ -1156,7 +1087,9 @@ def test_east_short_period_chop_raises_holding_unlike_north(
     north_data = dataset_factory(hour_updates=chop)
     east_data = dataset_factory(hour_updates=chop).model_copy(
         update={
-            "location": north_data.location.model_copy(update={"latitude": 35.7, "longitude": 10.9}),
+            "location": north_data.location.model_copy(
+                update={"latitude": 35.7, "longitude": 10.9}
+            ),
         }
     )
     north = engine.evaluate(north_data)

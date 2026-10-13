@@ -11,17 +11,13 @@ from spotdata.domain.enums import (
     DecisionLevel,
     DecisionReasonCode,
     ForceMajeureKind,
-    InmCheckStatus,
 )
 from spotdata.domain.models import (
     AnglerProfile,
-    AutomatedShoreProfile,
     AutoOrientationResponse,
     Coordinates,
     ForecastDataset,
-    InmWarningAudit,
     OfficialWarning,
-    OrientationEvidence,
     RankSpotsRequest,
     SpotCandidate,
     SpotProfile,
@@ -30,17 +26,6 @@ from spotdata.main import app
 
 engine = DecisionEngine()
 TZ = ZoneInfo("Africa/Tunis")
-
-
-def _unverified_inm_audit() -> InmWarningAudit:
-    return InmWarningAudit(
-        status=InmCheckStatus.UNVERIFIED,
-        checked_at=datetime.now(TZ),
-        coverage_status="unknown",
-        coverage_ar="unknown",
-        reason_code="synthetic_unverified",
-        explanation_ar="INM test source was not verifiable.",
-    )
 
 
 def _candidate(
@@ -118,7 +103,6 @@ def test_official_warning_input_is_ignored_by_the_engine(
     assert result.decision_reason_code == DecisionReasonCode.SAFE_WINDOW
     assert result.force_majeure_kind != ForceMajeureKind.ACCESS_LEGAL
     assert result.recommended_windows
-    assert any("GO النهائي يتطلب تحققاً آلياً حديثاً" in item for item in result.limitations_ar)
 
 
 def test_rank_spots_endpoint_returns_no_go_without_automated_spot_profile(
@@ -183,71 +167,6 @@ def test_rank_spots_endpoint_returns_no_go_without_automated_spot_profile(
     assert all(spot["opportunity_score"] is None for spot in body["ranked"])
     assert all("اتجاه الساحل" in spot["error_ar"] for spot in body["ranked"])
     mock_fetch.assert_not_awaited()
-
-
-def test_rank_spots_fails_closed_when_inm_warning_coverage_is_unverified(
-    dataset_factory: Callable[..., ForecastDataset],
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    now = datetime.now(TZ)
-    evidence = OrientationEvidence(
-        orientation_deg=90,
-        coastline_tangent_deg=0,
-        coastline_distance_m=35,
-        search_radius_m=3000,
-        segments_used=4,
-        confidence="high",
-        provider="OpenStreetMap Overpass",
-        server="https://overpass.test/api",
-        calculated_at=now,
-        limitations_ar=["test evidence"],
-    )
-    shore = AutomatedShoreProfile(
-        status="resolved",
-        retrieved_at=now,
-        shore_type="sandy",
-        exposure=None,
-        evidence_feature_id=123,
-        evidence_feature_version=1,
-        evidence_feature_timestamp=now,
-        feature_distance_m=10,
-        raw_tags={"natural": "beach", "surface": "sand"},
-        confidence="high",
-        limitations_ar=["test shore tags"],
-    )
-    profile = AutoOrientationResponse(
-        status="resolved",
-        orientation_deg=90,
-        evidence=evidence,
-        shore_profile=shore,
-        reasons_ar=["test profile"],
-    )
-    payload = RankSpotsRequest(
-        target_date=now.date(),
-        angler=AnglerProfile(experience="intermediate", session_hours=24),
-        spots=[_candidate("one", "بقعة", 36.8, 10.3)],
-    ).model_dump(mode="json")
-    dataset = dataset_factory(
-        target_date=now.date(),
-        count=96,
-        start_at=datetime.combine(now.date(), datetime.min.time(), TZ),
-    )
-    with TestClient(app) as client:
-        monkeypatch.setattr(app.state.coast_orientation, "resolve", AsyncMock(return_value=profile))
-        forecast_mock = AsyncMock(return_value=dataset)
-        monkeypatch.setattr(app.state.open_meteo, "forecast_dataset", forecast_mock)
-        inm_mock = AsyncMock(return_value=_unverified_inm_audit())
-        monkeypatch.setattr(app.state.inm_warnings, "check", inm_mock)
-        response = client.post("/api/v1/decisions/rank-spots", json=payload)
-    assert response.status_code == 200
-    body = response.json()
-    spot = body["ranked"][0]
-    assert spot["decision"] == "no_go"
-    assert spot["decision_reason_code"] == "official_warning_unverified"
-    assert "تعذر إثبات خلو نشرة INM" in spot["summary_ar"]
-    assert body["official_warning_check"]["status"] == "unverified"
-    forecast_mock.assert_awaited_once()
-    inm_mock.assert_awaited_once()
 
 
 def test_rank_spots_accepts_every_preset_spot() -> None:

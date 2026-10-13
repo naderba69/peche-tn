@@ -17,7 +17,6 @@ from spotdata.config import settings
 from spotdata.services.coast_orientation import CoastOrientationClient
 from spotdata.services.copernicus_water import CopernicusWaterClient
 from spotdata.services.gemini import GeminiClient
-from spotdata.services.inm_warnings import InmWarningClient
 from spotdata.services.open_meteo import OpenMeteoClient
 
 logging.basicConfig(
@@ -53,7 +52,6 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
             servers=settings.overpass_servers,
         )
         app.state.copernicus_water = CopernicusWaterClient(http_client=http_client)
-        app.state.inm_warnings = InmWarningClient(http_client=http_client)
         app.state.gemini = GeminiClient(
             http_client=http_client,
             base_url=settings.gemini_base_url,

@@ -118,11 +118,6 @@ export function buildTripBlockers(result: DecisionResponse): TripBlockerRow[] {
       : "";
   }
 
-  const inmBlocks =
-    result.official_warning_check?.status === "warning_active" ||
-    result.decision_reason_code === "official_warning" ||
-    result.decision_reason_code === "official_warning_unverified";
-
   const dataBlocks = [
     "critical_data_missing",
     "stale_forecast_data",
@@ -181,19 +176,11 @@ export function buildTripBlockers(result: DecisionResponse): TripBlockerRow[] {
       hourTime: firstHourWith(result, "visibility_no_go", "visibility_caution"),
     },
     {
-      id: "inm",
-      group: "سلامة",
-      label: "نشرة INM",
-      tone: inmBlocks ? "block" : result.official_warning_check?.status === "verified_clear" ? "clear" : "unknown",
-      blocksGo: inmBlocks,
-      detail: result.official_warning_check?.explanation_ar ?? "فحص النشرة الرسمية شرط للذهاب.",
-    },
-    {
       id: "data",
       group: "سلامة",
       label: "جودة التوقع",
       tone: dataBlocks || result.cache_fallback_used ? "block" : result.confidence.score < 50 ? "caution" : "clear",
-      blocksGo: dataBlocks || result.cache_fallback_used,
+      blocksGo: dataBlocks || Boolean(result.cache_fallback_used),
       detail: result.cache_fallback_used
         ? "توقع قديم من الكاش — لا يُعتمد للتخطيط."
         : `اكتمال ${result.confidence.score}/100 (ليست دقة ميدانية).`,

@@ -654,7 +654,6 @@ REASON_TO_FORCE = {
     DecisionReasonCode.CONSERVATIVE_UNCERTAINTY: ForceMajeureKind.DATA,
     DecisionReasonCode.FOULING_CONFIRMED: ForceMajeureKind.FOULING,
     DecisionReasonCode.FOULING_PROXY_RISK: ForceMajeureKind.FOULING,
-    DecisionReasonCode.OFFICIAL_WARNING: ForceMajeureKind.ACCESS_LEGAL,
 }
 
 

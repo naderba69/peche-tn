@@ -41,6 +41,36 @@ function fingerprint(value: ForecastDecisionRequest): string {
   return JSON.stringify(value);
 }
 
+function VerdictStrip({
+  result,
+  loading,
+  spotName,
+  targetDate,
+}: {
+  result: DecisionApiResponse | null;
+  loading: boolean;
+  spotName: string;
+  targetDate: string;
+}) {
+  let tone = "pending";
+  let label = "لم يُحسب القرار بعد";
+  if (loading) label = "جارٍ حساب القرار…";
+  else if (result && "hourly" in result) {
+    tone = result.decision === "go" ? "go" : "no-go";
+    label = result.decision_label_ar;
+  } else if (result) {
+    tone = "no-go";
+    label = result.decision_label_ar;
+  }
+  return (
+    <section className={`verdict-strip verdict-${tone}`} aria-live="polite" data-testid="verdict-strip">
+      <span><small>البقعة</small><strong>{spotName}</strong></span>
+      <span><small>اليوم</small><bdi>{targetDate}</bdi></span>
+      <span className="verdict-label"><small>القرار</small><strong>{label}</strong></span>
+    </section>
+  );
+}
+
 export function DecisionApp() {
   const hydrated = useSyncExternalStore(subscribeToHydration, () => true, () => false);
   const [request, setRequest] = useState<ForecastDecisionRequest>(initialRequest);
@@ -179,6 +209,12 @@ export function DecisionApp() {
           <span><Server size={14} /> Gemini اختياري بمفتاحك</span>
         </div>
       </section>
+      <VerdictStrip
+        result={result}
+        loading={loading}
+        spotName={request.location.name ?? "البقعة المختارة"}
+        targetDate={request.target_date}
+      />
       <Planner
         value={request}
         loading={loading}
@@ -198,11 +234,11 @@ export function DecisionApp() {
         />
       )}
       {result && !("hourly" in result) && (
-        <section className={`decision-preflight-no-go ${result.decision_reason_code === "official_warning_unverified" ? "preflight-inm-unverified" : "preflight-context-missing"}`} id="decision" role="status" aria-live="polite">
-          <div className="decision-preflight-label">{result.decision_reason_code === "official_warning_unverified" ? "لا تذهب · INM غير متحقق" : "لا تذهب · بيانات/سياق ناقص"}</div>
+        <section className="decision-preflight-no-go preflight-context-missing" id="decision" role="status" aria-live="polite">
+          <div className="decision-preflight-label">لا تذهب · بيانات/سياق ناقص</div>
           <h2>{result.summary_ar}</h2>
           <ul>{result.missing_context_ar.map((item) => <li key={item}>{item}</li>)}</ul>
-          <small>{result.decision_reason_code === "official_warning_unverified" ? "لم يثبت التطبيق حداثة نشرة INM ونطاق تغطيتها؛ لذلك لا يصدر GO." : "لم يبدأ تحليل الطقس لأن اتجاه الساحل الموثق غير متوفر، أو لم تكتمل ساعات توقع اليوم الكامل."}</small>
+          <small>{"لم يبدأ تحليل الطقس لأن اتجاه الساحل الموثق غير متوفر، أو لم تكتمل ساعات توقع اليوم الكامل."}</small>
           {result.automated_orientation && (
             <details className="preflight-provenance">
               <summary>الدليل الساحلي الخام المتاح</summary>

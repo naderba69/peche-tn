@@ -16,7 +16,6 @@ from .enums import (
     FactorImpact,
     FieldFeasibilityLevel,
     ForceMajeureKind,
-    InmCheckStatus,
     LeadShape,
     MontageClass,
     ObservationMatchStatus,
@@ -932,76 +931,6 @@ class DecisionPreflightNoGo(StrictModel):
         return value
 
 
-class InmWarningAudit(StrictModel):
-    """Request-scoped audit record for the official INM BMS check.
-
-    It contains source/parse evidence only; spot coordinates, trip histories and
-    catch reports are deliberately excluded and the record is not persisted.
-    """
-
-    status: InmCheckStatus
-    request_id: str | None = Field(default=None, max_length=80)
-    provider: Literal["INM Tunisia BMS"] = "INM Tunisia BMS"
-    source_url: str = Field(default="https://www.meteo.tn/en/bms", max_length=300)
-    checked_at: datetime
-    http_status_code: int | None = Field(default=None, ge=100, le=599)
-    server_date: datetime | None = None
-    response_age_seconds: float | None = Field(default=None, ge=0)
-    cache_control: str | None = Field(default=None, max_length=300)
-    age_header_seconds: int | None = Field(default=None, ge=0)
-    response_sha256: str | None = Field(default=None, pattern="^[a-f0-9]{64}$")
-    parser_version: str = "inm-bms-1"
-    coverage_status: Literal["verified_tunisian_coasts", "unknown", "not_checked"] = "unknown"
-    coverage_ar: str
-    warning_entries_parsed: int = Field(default=0, ge=0)
-    warning_summary_ar: list[str] = Field(default_factory=list, max_length=10)
-    warning_valid_from: datetime | None = None
-    warning_valid_until: datetime | None = None
-    threatened_areas: list[str] = Field(default_factory=list, max_length=20)
-    reason_code: str = Field(min_length=2, max_length=80)
-    explanation_ar: str = Field(min_length=3, max_length=700)
-
-    @field_validator("checked_at", "server_date", "warning_valid_from", "warning_valid_until")
-    @classmethod
-    def audit_times_must_be_timezone_aware(cls, value: datetime | None) -> datetime | None:
-        if value is not None and (value.tzinfo is None or value.utcoffset() is None):
-            raise ValueError("INM audit timestamps must include a timezone")
-        return value
-
-    @model_validator(mode="after")
-    def verified_states_require_audit_evidence(self) -> InmWarningAudit:
-        if self.status in {InmCheckStatus.VERIFIED_CLEAR, InmCheckStatus.WARNING_ACTIVE}:
-            cache_policy = (self.cache_control or "").casefold()
-            if (
-                self.http_status_code != 200
-                or self.source_url != "https://www.meteo.tn/en/bms"
-                or self.server_date is None
-                or self.response_age_seconds is None
-                or self.response_age_seconds > 1800
-                or self.age_header_seconds not in {None, 0}
-                or not any(
-                    token in cache_policy for token in ("no-cache", "no-store", "must-revalidate")
-                )
-                or self.response_sha256 is None
-                or self.coverage_status != "verified_tunisian_coasts"
-            ):
-                raise ValueError("verified INM state requires fresh source and coverage evidence")
-        if self.status == InmCheckStatus.WARNING_ACTIVE and (
-            self.warning_valid_from is None
-            or self.warning_valid_until is None
-            or not self.threatened_areas
-            or not self.warning_summary_ar
-        ):
-            raise ValueError("active INM warning requires parsed validity and area evidence")
-        if (
-            self.warning_valid_from is not None
-            and self.warning_valid_until is not None
-            and self.warning_valid_until <= self.warning_valid_from
-        ):
-            raise ValueError("INM warning validity must be a positive interval")
-        return self
-
-
 class DecisionResponse(StrictModel):
     schema_version: Literal["3.20"] = SCHEMA_VERSION
     engine_version: str
@@ -1034,7 +963,6 @@ class DecisionResponse(StrictModel):
     sources: list[SourceMetadata]
     current_weather_observation: WeatherStationObservation | None = None
     coastal_water_context: CoastalWaterContext | None = None
-    official_warning_check: InmWarningAudit | None = None
     cache_fallback_used: bool = False
     cache_fallback_age_seconds: float | None = Field(default=None, ge=0)
     spot_profile: SpotProfile | None = None
@@ -1122,8 +1050,8 @@ class TestCast(StrictModel):
 class OfficialWarning(StrictModel):
     """Legacy client-entered warning claim retained for compatibility, but ignored.
 
-    The server's independent INM BMS checker is the only warning source in the
-    decision path. User-entered claims are not treated as verified evidence.
+    No official warning feed is consulted by the decision path, and user-entered
+    claims are never treated as verified evidence.
     """
 
     source: Literal["inm", "other_official"] = "inm"
@@ -1160,7 +1088,7 @@ class ForecastDecisionRequest(StrictModel):
     official_warning: OfficialWarning | None = Field(
         default=None,
         deprecated=True,
-        description="Deprecated; accepted for compatibility and ignored; the server fetches INM independently",
+        description="Deprecated; accepted for compatibility and ignored; no official warning feed is consulted",
     )
 
 
@@ -1302,7 +1230,7 @@ class RankSpotsRequest(StrictModel):
     official_warning: OfficialWarning | None = Field(
         default=None,
         deprecated=True,
-        description="Deprecated; accepted for compatibility and ignored; the server fetches INM independently",
+        description="Deprecated; accepted for compatibility and ignored; no official warning feed is consulted",
     )
 
 
@@ -1339,5 +1267,4 @@ class RankSpotsResponse(StrictModel):
     target_date: date
     generated_at: datetime
     ranked: list[RankedSpot]
-    official_warning_check: InmWarningAudit | None = None
     notes_ar: list[str] = Field(default_factory=list)

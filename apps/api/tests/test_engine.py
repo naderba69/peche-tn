@@ -457,9 +457,10 @@ def test_previous_rain_and_persistent_onshore_energy_raise_transport_screen(
     assert midnight.derived.rain_24h_mm == 27.0
     assert midnight.derived.onshore_wind_fraction_12h == 1.0
     assert midnight.field_feasibility.fouling_transport_potential == PotentialLevel.HIGH
-    assert midnight.field_feasibility.rip_current_potential == PotentialLevel.MODERATE
+    # Hs 1.0 m + T 7 s + angled incidence on a channel-forming beach = intersection -> HIGH.
+    assert midnight.field_feasibility.rip_current_potential == PotentialLevel.HIGH
     assert midnight.safety == DecisionLevel.CAUTION
-    assert not any(factor.code == "elevated_rip_current_potential" for factor in midnight.factors)
+    assert any(factor.code == "elevated_rip_current_potential" for factor in midnight.factors)
     assert midnight.field_feasibility.confidence == 50
     assert midnight.field_feasibility.is_direct_observation is False
     assert any("ليس رصداً" in item for item in midnight.field_feasibility.limitations_ar)
@@ -1125,3 +1126,16 @@ def test_data_gaps_are_reported_per_field(
     )
     assert any("فارغ في 24 من 24 ساعة" in line for line in gappy.data_gaps_ar)
     assert all("غير متوفر، وليس صفراً" in line for line in gappy.data_gaps_ar)
+
+
+def test_rip_current_high_needs_intersection_not_a_sum(
+    dataset_factory: Callable[..., ForecastDataset],
+) -> None:
+    # A big single driver alone (tall but short-period, shore-parallel) must not be HIGH.
+    def only_height(index: int, values: dict[str, object]) -> None:
+        values["wave_height_m"] = 1.3
+        values["wave_period_s"] = 3.0
+        values["wave_direction_deg"] = 270.0
+
+    result = engine.evaluate(dataset_factory(per_hour=only_height, count=48))
+    assert result.hourly[0].field_feasibility.rip_current_potential != PotentialLevel.HIGH

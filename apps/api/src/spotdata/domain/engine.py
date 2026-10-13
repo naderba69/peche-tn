@@ -1331,6 +1331,17 @@ class DecisionEngine:
         else:
             turbidity = PotentialLevel.UNKNOWN
 
+        # Rip current = intersection of drivers, not a sum. HIGH needs all of:
+        #   A) breaking waves (Hs >= 0.7 m),
+        #   B) plunging long-period waves (T >= 5 s),
+        #   C) oblique or direct incidence (alongshore gradient),
+        # and a beach that forms channels (sandy/jetty) or very large surf (Hs >= 1.2 m).
+        # Partial overlap gives MODERATE from the older points score, so a single
+        # driver never turns the whole hour into HIGH.
+        breaking = hour.wave_height_m >= 0.7
+        long_period = hour.wave_period_s >= 5
+        angled = derived.wave_incidence in {WaveIncidence.DIRECT, WaveIncidence.OBLIQUE}
+        channel_beach = dataset.spot.shore_type in {ShoreType.SANDY, ShoreType.JETTY}
         rip_points = 0
         if hour.wave_height_m >= 1.2:
             rip_points += 3
@@ -1340,9 +1351,9 @@ class DecisionEngine:
             rip_points += 1
         if hour.wave_period_s >= 8:
             rip_points += 2
-        elif hour.wave_period_s >= 5:
+        elif long_period:
             rip_points += 1
-        if derived.wave_incidence in {WaveIncidence.DIRECT, WaveIncidence.OBLIQUE}:
+        if angled:
             rip_points += 1
         if dataset.spot.shore_type == ShoreType.JETTY:
             rip_points += 2
@@ -1350,7 +1361,15 @@ class DecisionEngine:
             rip_points += 1
         if energetic_48h:
             rip_points += 1
-        rip = _potential_level(rip_points, moderate_at=4, high_at=7)
+        intersection = (
+            breaking and long_period and angled and (channel_beach or hour.wave_height_m >= 1.2)
+        )
+        if intersection:
+            rip = PotentialLevel.HIGH
+        elif rip_points >= 4:
+            rip = PotentialLevel.MODERATE
+        else:
+            rip = PotentialLevel.LOW
 
         deductions = {
             PotentialLevel.LOW: 0,

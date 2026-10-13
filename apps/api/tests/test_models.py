@@ -114,3 +114,14 @@ def test_satellite_context_enforces_availability_age_and_unit_contract() -> None
             turbidity_fnu=0.32,
             reason_ar="اختبار.",
         )
+
+
+def test_bottom_type_is_optional_user_entry_and_defaults_to_unknown() -> None:
+    from spotdata.domain.enums import BottomType
+    from spotdata.domain.models import SpotProfile
+
+    empty = SpotProfile()
+    assert empty.bottom_type is None
+    assert empty.bottom_type_source == "unknown"
+    entered = SpotProfile(bottom_type=BottomType.ROCK, bottom_type_source="user")
+    assert entered.bottom_type == BottomType.ROCK

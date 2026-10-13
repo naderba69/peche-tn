@@ -87,6 +87,16 @@ class ShoreType(StrEnum):
     JETTY = "jetty"
 
 
+class BottomType(StrEnum):
+    """User-entered seabed type. Not sourced; never inferred by the engine."""
+
+    SAND = "sand"
+    ROCK = "rock"
+    MIXED = "mixed"
+    POSIDONIA = "posidonia"
+    MUD = "mud"
+
+
 class Exposure(StrEnum):
     OPEN = "open"
     PARTLY_SHELTERED = "partly_sheltered"

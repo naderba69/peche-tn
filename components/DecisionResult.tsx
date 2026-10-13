@@ -387,7 +387,7 @@ export function DecisionResult({ result, request, stale = false }: DecisionResul
         <section className={`no-go-explanation no-go-${noGoCategory[result.decision_reason_code]}`} role="alert">
           <AlertOctagon size={20} />
           <div>
-            <strong>{result.decision_reason_code === "safety_hazard" ? "منع بسبب خطر بحري/جوي" : result.decision_reason_code === "field_infeasible" ? "منع بسبب صعوبة التنفيذ" : result.decision_reason_code === "critical_data_missing" && result.spot_profile?.shore_type == null ? "نوع الشاطئ غير محدد" : result.decision_reason_code === "stale_forecast_data" || result.decision_reason_code === "forecast_horizon_exceeded" || result.decision_reason_code === "critical_data_missing" ? "منع بسبب جودة البيانات أو أفقها" : "سبب منع آخر"}</strong>
+            <strong>{result.decision_reason_code === "safety_hazard" ? "منع بسبب خطر بحري/جوي" : result.decision_reason_code === "field_infeasible" ? "منع بسبب صعوبة التنفيذ" : result.decision_reason_code === "critical_data_missing" && result.spot_profile?.shore_type == null ? "نوع الشاطئ غير محدد" : result.decision_reason_code === "stale_forecast_data" || result.decision_reason_code === "forecast_horizon_exceeded" || result.decision_reason_code === "critical_data_missing" ? "منع بسبب جودة البيانات أو أفقها" : result.decision_reason_code === "conservative_uncertainty" ? "منع بسبب شك محافظ في المدخلات" : "سبب منع آخر"}</strong>
             <p>{result.summary_ar}</p>
           </div>
         </section>

@@ -46,6 +46,8 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
             weather_url=settings.weather_url,
             marine_url=settings.marine_url,
             observation_url=settings.observation_url,
+            secondary_marine_model=settings.secondary_marine_model,
+            secondary_weather_model=settings.secondary_weather_model,
         )
         app.state.coast_orientation = CoastOrientationClient(
             http_client=http_client,

@@ -220,6 +220,8 @@ class ForecastHour(StrictModel):
     pressure_msl_hpa: float | None = Field(default=None, ge=850, le=1100)
     visibility_m: float | None = Field(default=None, ge=0)
     cape_jkg: float | None = Field(default=None, ge=0)
+    # Fields in this hour that were filled from the secondary model family (gap-fill only).
+    gap_filled_fields: list[str] = Field(default_factory=list)
 
     @field_validator("time")
     @classmethod

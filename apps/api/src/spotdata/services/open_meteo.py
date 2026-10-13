@@ -69,6 +69,43 @@ WEATHER_VARIABLES = (
     "cape",
 )
 
+# Raw Open-Meteo hourly variable -> ForecastHour field, used to report which hourly
+# values were gap-filled from the secondary model family.
+MARINE_RAW_TO_FIELD: dict[str, str] = {
+    "wave_height": "wave_height_m",
+    "wave_period": "wave_period_s",
+    "wave_direction": "wave_direction_deg",
+    "wind_wave_height": "wind_wave_height_m",
+    "wind_wave_period": "wind_wave_period_s",
+    "wind_wave_direction": "wind_wave_direction_deg",
+    "swell_wave_height": "swell_height_m",
+    "swell_wave_period": "swell_period_s",
+    "swell_wave_direction": "swell_direction_deg",
+    "sea_surface_temperature": "sea_surface_temperature_c",
+    "ocean_current_velocity": "ocean_current_velocity_kmh",
+    "ocean_current_direction": "ocean_current_direction_deg",
+    "sea_level_height_msl": "sea_level_height_msl_m",
+}
+WEATHER_RAW_TO_FIELD: dict[str, str] = {
+    "wind_speed_10m": "wind_speed_kmh",
+    "wind_gusts_10m": "wind_gust_kmh",
+    "wind_direction_10m": "wind_direction_deg",
+    "temperature_2m": "air_temperature_c",
+    "apparent_temperature": "apparent_temperature_c",
+    "relative_humidity_2m": "relative_humidity_pct",
+    "dew_point_2m": "dew_point_c",
+    "cloud_cover": "cloud_cover_pct",
+    "shortwave_radiation": "shortwave_radiation_wm2",
+    "uv_index": "uv_index",
+    "lightning_potential": "lightning_potential_jkg",
+    "precipitation": "precipitation_mm",
+    "precipitation_probability": "precipitation_probability_pct",
+    "weather_code": "weather_code",
+    "pressure_msl": "pressure_msl_hpa",
+    "visibility": "visibility_m",
+    "cape": "cape_jkg",
+}
+
 
 class UpstreamDataError(RuntimeError):
     def __init__(self, message_ar: str, *, details: dict[str, Any] | None = None) -> None:
@@ -83,6 +120,9 @@ class _UpstreamBundle:
     weather: dict[str, Any]
     metar: list[Any]
     retrieved_at: datetime
+    # Optional second model family, used only to fill gaps. None when disabled/unavailable.
+    secondary_marine: dict[str, Any] | None = None
+    secondary_weather: dict[str, Any] | None = None
 
 
 class OpenMeteoClient:
@@ -94,12 +134,16 @@ class OpenMeteoClient:
         observation_url: str = "https://aviationweather.gov/api/data/metar",
         *,
         stale_seconds: float = _STALE_BUNDLE_SECONDS,
+        secondary_marine_model: str = "",
+        secondary_weather_model: str = "",
     ) -> None:
         self._http = http_client
         self._weather_url = weather_url
         self._marine_url = marine_url
         self._observation_url = observation_url
         self._stale_seconds = stale_seconds
+        self._secondary_marine_model = secondary_marine_model
+        self._secondary_weather_model = secondary_weather_model
         self._stale_bundles: OrderedDict[
             tuple[float, float, date, bool], tuple[float, _UpstreamBundle]
         ] = OrderedDict()
@@ -181,6 +225,10 @@ class OpenMeteoClient:
             retrieved_at=bundle.retrieved_at,
             cache_fallback_used=cache_fallback_used,
             cache_fallback_age_seconds=cache_fallback_age_seconds,
+            secondary_marine=bundle.secondary_marine,
+            secondary_marine_model=self._secondary_marine_model or None,
+            secondary_weather=bundle.secondary_weather,
+            secondary_weather_model=self._secondary_weather_model or None,
         )
 
     async def _fetch_bundle(
@@ -195,11 +243,37 @@ class OpenMeteoClient:
             if include_current_observation
             else asyncio.sleep(0, result=[])
         )
+        secondary_marine_task = (
+            self._get_optional_json(
+                self._marine_url,
+                {**marine_params, "models": self._secondary_marine_model},
+                "البحر (نموذج ثانٍ)",
+            )
+            if self._secondary_marine_model
+            else asyncio.sleep(0, result=None)
+        )
+        secondary_weather_task = (
+            self._get_optional_json(
+                self._weather_url,
+                {**weather_params, "models": self._secondary_weather_model},
+                "الطقس (نموذج ثانٍ)",
+            )
+            if self._secondary_weather_model
+            else asyncio.sleep(0, result=None)
+        )
         try:
-            marine_result, weather_result, metar_result = await asyncio.gather(
+            (
+                marine_result,
+                weather_result,
+                metar_result,
+                secondary_marine,
+                secondary_weather,
+            ) = await asyncio.gather(
                 self._get_json(self._marine_url, marine_params, "البحر"),
                 self._get_json(self._weather_url, weather_params, "الطقس"),
                 observation_task,
+                secondary_marine_task,
+                secondary_weather_task,
             )
         except UpstreamDataError:
             raise
@@ -210,7 +284,25 @@ class OpenMeteoClient:
             weather=weather_result,
             metar=metar_result,
             retrieved_at=datetime.now(TUNIS_TZ),
+            secondary_marine=secondary_marine,
+            secondary_weather=secondary_weather,
         )
+
+    async def _get_optional_json(
+        self, url: str, params: dict[str, Any], source_label: str
+    ) -> dict[str, Any] | None:
+        # A secondary model must never make the primary forecast fail: one attempt, no
+        # retry storm, and any error simply means "no gap-filling this time".
+        try:
+            response = await self._http.get(url, params=params)
+            response.raise_for_status()
+            payload = response.json()
+            if not isinstance(payload, dict):
+                raise ValueError("JSON root is not an object")
+            return payload
+        except (httpx.HTTPError, ValueError) as exc:
+            LOGGER.warning("Open-Meteo %s unavailable, gap-fill skipped: %s", source_label, exc)
+            return None
 
     async def _get_optional_observations(self) -> list[Any]:
         params: dict[str, str | int] = {
@@ -299,11 +391,23 @@ def parse_open_meteo(
     metar: list[Any] | None = None,
     cache_fallback_used: bool = False,
     cache_fallback_age_seconds: float | None = None,
+    secondary_marine: dict[str, Any] | None = None,
+    secondary_marine_model: str | None = None,
+    secondary_weather: dict[str, Any] | None = None,
+    secondary_weather_model: str | None = None,
 ) -> ForecastDataset:
     marine_hourly = _object(marine.get("hourly"), "marine.hourly")
     weather_hourly = _object(weather.get("hourly"), "weather.hourly")
     marine_index = _time_index(marine_hourly, "marine")
     weather_index = _time_index(weather_hourly, "weather")
+    # Gap-fill ONLY empty primary values from the independent secondary family. The
+    # primary blend stays authoritative; filled values are tagged per hour and per field.
+    marine_hourly, marine_filled = _fill_hourly_gaps(
+        marine_hourly, marine_index, secondary_marine, MARINE_VARIABLES
+    )
+    weather_hourly, weather_filled = _fill_hourly_gaps(
+        weather_hourly, weather_index, secondary_weather, WEATHER_VARIABLES
+    )
     common_times = sorted(set(marine_index).intersection(weather_index))
     if not common_times:
         raise UpstreamDataError(
@@ -356,9 +460,11 @@ def parse_open_meteo(
                 pressure_msl_hpa=_number(weather_hourly, "pressure_msl", weather_i),
                 visibility_m=_number(weather_hourly, "visibility", weather_i),
                 cape_jkg=_number(weather_hourly, "cape", weather_i),
+                gap_filled_fields=_gap_filled_fields(time_text, marine_filled, weather_filled),
             )
         )
 
+    _log_forecast_gaps(request, hours, marine_filled, weather_filled)
     sunrise, sunset = _sun_times(weather, request.target_date)
     moonrise, moonset = _moon_times(weather, request.target_date)
     marine_variables = [name for name in MARINE_VARIABLES if name in marine_hourly]
@@ -395,6 +501,36 @@ def parse_open_meteo(
             ],
         ),
     ]
+    if secondary_marine is not None and secondary_marine_model:
+        sources.append(
+            SourceMetadata(
+                provider="Open-Meteo (نموذج بحري ثانٍ مستقل)",
+                product=f"Marine Weather API model={secondary_marine_model} (gap-fill فقط)",
+                data_kind="model_forecast",
+                variables=list(marine_filled),
+                horizontal_resolution_km=8.0,
+                retrieved_at=retrieved_at,
+                limitations_ar=[
+                    "استُعمل هذا النموذج فقط لملء قيم فارغة في النموذج الأساسي، ولا يحلّ محله.",
+                    "نموذج مختلف المؤسسة/الشبكة يرفع التنوع، لكنه لا يعني تحققاً ميدانياً من الموج داخل الكسرة.",
+                ],
+            )
+        )
+    if secondary_weather is not None and secondary_weather_model:
+        sources.append(
+            SourceMetadata(
+                provider="Open-Meteo (نموذج طقس ثانٍ مستقل)",
+                product=f"Weather Forecast API model={secondary_weather_model} (gap-fill فقط)",
+                data_kind="model_forecast",
+                variables=[v for v in weather_filled],
+                horizontal_resolution_km=None,
+                retrieved_at=retrieved_at,
+                limitations_ar=[
+                    "استُعمل هذا النموذج فقط لملء قيم طقس فارغة في النموذج الأساسي، ولا يحلّ محله.",
+                    "لا يقيس النموذج الرعد أو الرؤية داخل البقعة؛ هو توقع عددي آخر.",
+                ],
+            )
+        )
     if current_observation is not None:
         sources.append(
             SourceMetadata(
@@ -442,6 +578,110 @@ def _object(value: Any, path: str) -> dict[str, Any]:
     if not isinstance(value, dict):
         raise UpstreamDataError("بيانات مزود الأرصاد ناقصة.", details={"missing_or_invalid": path})
     return value
+
+
+def _fill_hourly_gaps(
+    primary: dict[str, Any],
+    primary_index: dict[str, int],
+    secondary: dict[str, Any] | None,
+    variables: tuple[str, ...],
+) -> tuple[dict[str, Any], dict[str, set[str]]]:
+    """Return a copy of ``primary`` hourly data with None values replaced by secondary values.
+
+    The result maps each filled raw variable to the set of ISO times that were filled.
+    Inputs are never mutated because the upstream bundle is cached.
+    """
+    filled: dict[str, set[str]] = {}
+    if not isinstance(secondary, dict):
+        return primary, filled
+    secondary_hourly = secondary.get("hourly")
+    if not isinstance(secondary_hourly, dict):
+        return primary, filled
+    try:
+        secondary_index = _time_index(secondary_hourly, "secondary")
+    except UpstreamDataError:
+        return primary, filled
+
+    replacements: dict[str, list[Any]] = {}
+    for name in variables:
+        primary_values = primary.get(name)
+        secondary_values = secondary_hourly.get(name)
+        if not isinstance(primary_values, list) or not isinstance(secondary_values, list):
+            continue
+        new_values = list(primary_values)
+        times_filled: set[str] = set()
+        for time_text, index in primary_index.items():
+            if index >= len(new_values) or new_values[index] is not None:
+                continue
+            secondary_i = secondary_index.get(time_text)
+            if secondary_i is None or secondary_i >= len(secondary_values):
+                continue
+            candidate = secondary_values[secondary_i]
+            if candidate is None or isinstance(candidate, bool):
+                continue
+            new_values[index] = candidate
+            times_filled.add(time_text)
+        if times_filled:
+            replacements[name] = new_values
+            filled[name] = times_filled
+    if not replacements:
+        return primary, filled
+    return {**primary, **replacements}, filled
+
+
+def _gap_filled_fields(
+    time_text: str,
+    marine_filled: dict[str, set[str]],
+    weather_filled: dict[str, set[str]],
+) -> list[str]:
+    fields: list[str] = []
+    for raw, times in marine_filled.items():
+        if time_text in times and raw in MARINE_RAW_TO_FIELD:
+            fields.append(MARINE_RAW_TO_FIELD[raw])
+    for raw, times in weather_filled.items():
+        if time_text in times and raw in WEATHER_RAW_TO_FIELD:
+            fields.append(WEATHER_RAW_TO_FIELD[raw])
+    return sorted(fields)
+
+
+def _log_forecast_gaps(
+    request: ForecastDecisionRequest,
+    hours: list[ForecastHour],
+    marine_filled: dict[str, set[str]],
+    weather_filled: dict[str, set[str]],
+) -> None:
+    """Log which decision-relevant fields are still empty, for diagnosing the quality score."""
+    if not hours:
+        return
+    tracked = (
+        "wind_speed_kmh",
+        "wind_gust_kmh",
+        "wind_direction_deg",
+        "wave_height_m",
+        "wave_period_s",
+        "wave_direction_deg",
+        "swell_height_m",
+        "ocean_current_velocity_kmh",
+        "sea_level_height_msl_m",
+        "visibility_m",
+        "weather_code",
+        "pressure_msl_hpa",
+    )
+    missing = {name: sum(1 for hour in hours if getattr(hour, name) is None) for name in tracked}
+    missing = {name: count for name, count in missing.items() if count}
+    filled_counts = {
+        "marine": {raw: len(times) for raw, times in marine_filled.items()},
+        "weather": {raw: len(times) for raw, times in weather_filled.items()},
+    }
+    LOGGER.info(
+        "forecast gaps date=%s lat=%.2f lon=%.2f hours=%d missing=%s gap_filled=%s",
+        request.target_date.isoformat(),
+        request.location.latitude,
+        request.location.longitude,
+        len(hours),
+        missing,
+        filled_counts,
+    )
 
 
 def _time_index(hourly: dict[str, Any], source: str) -> dict[str, int]:

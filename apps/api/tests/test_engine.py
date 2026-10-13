@@ -368,6 +368,22 @@ def test_inconsistent_wave_direction_reduces_confidence_and_warns(
     assert any(factor.code == "wave_direction_inconsistent" for factor in result.hourly[0].factors)
 
 
+def test_small_land_side_wave_does_not_trigger_direction_caution(
+    dataset_factory: Callable[..., ForecastDataset],
+) -> None:
+    # A 0.4 m wave from the land side is a normal small local wave under offshore
+    # wind; it must not turn every hour into caution or cap its confidence.
+    result = engine.evaluate(
+        dataset_factory(hour_updates={"wave_direction_deg": 270.0, "wave_height_m": 0.4})
+    )
+    assert all(
+        factor.code != "wave_direction_inconsistent"
+        for hour in result.hourly
+        for factor in hour.factors
+    )
+    assert all(hour.confidence.score > 55 for hour in result.hourly)
+
+
 def test_target_species_weights_are_small_and_explained(
     dataset_factory: Callable[..., ForecastDataset],
 ) -> None:

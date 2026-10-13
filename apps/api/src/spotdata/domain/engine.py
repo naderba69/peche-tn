@@ -139,6 +139,19 @@ _SATELLITE_DECISION_MAX_AGE_HOURS = 72.0
 _SATELLITE_ARCHIVE_AGE_HOURS = 168.0
 _TUR_MODERATE_FNU = 2.0
 _TUR_HIGH_FNU = 5.0
+# A land-side wave is only a material data doubt when the wave itself is large
+# enough to matter at the shore. Small locally generated waves (offshore wind)
+# are normal on exposed coasts and must not turn every hour into caution.
+MATERIAL_LAND_SIDE_WAVE_M = 0.5
+
+
+def _land_side_wave_is_material(hour: object, incidence: WaveIncidence) -> bool:
+    if incidence != WaveIncidence.INCONSISTENT:
+        return False
+    height = getattr(hour, "wave_height_m", None)
+    return height is not None and height >= MATERIAL_LAND_SIDE_WAVE_M
+
+
 _MHW_MODERATE_ANOMALY_C = 2.0
 _MHW_STRONG_ANOMALY_C = 3.0
 # Monthly coastal SST climatology (°C) by Tunisian zone — Gabès/south run
@@ -1990,7 +2003,7 @@ class DecisionEngine:
                 )
             )
 
-        if derived.wave_incidence == WaveIncidence.INCONSISTENT:
+        if _land_side_wave_is_material(hour, derived.wave_incidence):
             factors.append(
                 Factor(
                     code="wave_direction_inconsistent",
@@ -2640,7 +2653,7 @@ class DecisionEngine:
         critical_missing = [name for name in CRITICAL_FIELDS if getattr(hour, name) is None]
         if critical_missing:
             score = min(score, 45)
-        if derived.wave_incidence == WaveIncidence.INCONSISTENT:
+        if _land_side_wave_is_material(hour, derived.wave_incidence):
             score = min(score, 55)
         # A station/model divergence is a snapshot near the fetch time, so it only
         # caps the confidence of hours close to the observation — the same ±2 h
@@ -2664,7 +2677,7 @@ class DecisionEngine:
             reasons.append("كل المتغيرات الأساسية والساندة متوفرة لهذه الساعة.")
         if dataset.spot.orientation_source.value in {"map", "estimated"}:
             reasons.append("اتجاه الشاطئ تقديري ويؤثر في تصنيف الرياح والموج.")
-        if derived.wave_incidence == WaveIncidence.INCONSISTENT:
+        if _land_side_wave_is_material(hour, derived.wave_incidence):
             reasons.append("اتجاه الموج غير متسق مع اتجاه البحر في البقعة.")
         if station_divergence_applies:
             reasons.append(
@@ -2692,7 +2705,7 @@ class DecisionEngine:
                 source_quality=source_quality,
                 orientation_quality=orientation_quality,
                 critical_missing=[_FIELD_LABELS_AR[name] for name in critical_missing],
-                wave_inconsistent=derived.wave_incidence == WaveIncidence.INCONSISTENT,
+                wave_inconsistent=_land_side_wave_is_material(hour, derived.wave_incidence),
                 station_divergence=station_divergence_applies,
             ),
         )

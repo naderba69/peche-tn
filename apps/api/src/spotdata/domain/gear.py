@@ -117,6 +117,38 @@ def weight_band_for(
     return "medium", WEIGHT_BANDS["medium"]
 
 
+# Rod cap in grams: the printed limit on most surf rods is the operator's hard
+# constraint, and the engine never proposes beyond it (no manual input: the
+# default is the common surf-rod ceiling, stated to the user).
+ROD_CAP_G = 150
+
+
+# Bottom-load bands from the near-bed orbital velocity (m/s). The 0.15 m/s
+# floor is the sand-motion range used in the constitution (E7); the 0.30 and
+# 0.50 steps are estimates [C] to be calibrated against logged casts.
+def band_from_orbital_velocity(u_ms: float) -> str | None:
+    """Return the weight band a bottom load needs, or None beyond the rod cap."""
+    if u_ms < 0.15:
+        return "light"
+    if u_ms < 0.30:
+        return "medium"
+    if u_ms < 0.50:
+        return "heavy"
+    return None
+
+
+def _clamped_band(key: str) -> tuple[int, int, str]:
+    low, high, label = WEIGHT_BANDS[key]
+    return min(low, ROD_CAP_G), min(high, ROD_CAP_G), label
+
+
+def _scenario_band_key(index: int, base_key: str) -> str:
+    order = ["light", "medium", "heavy", "extreme"]
+    if index == 0:
+        return base_key
+    return order[max(0, order.index(base_key) - 1)]
+
+
 def montage_class_for(holding: PotentialLevel) -> MontageClass:
     """Lower-resistance montage helps against drag; heavier setups increase drag."""
     if holding in {PotentialLevel.HIGH, PotentialLevel.MODERATE}:
@@ -199,15 +231,24 @@ def recommend_gear(
     fouling: PotentialLevel,
     wave_height_m: float | None,
     wind_speed_kmh: float | None,
+    orbital_velocity_ms: float | None = None,
 ) -> GearRecommendation:
     dominant = getattr(breakdown, "dominant", "none")
     breakdown_conf = getattr(breakdown, "confidence", 0) if breakdown is not None else 0
     shapes = primary_shapes_for(dominant)
     montage = montage_class_for(holding)
+    beyond_cap = False
+    if orbital_velocity_ms is not None:
+        load_key = band_from_orbital_velocity(orbital_velocity_ms)
+        if load_key is None:
+            beyond_cap = True
+            load_key = "heavy"
+    else:
+        load_key, _ = weight_band_for(holding, wave_height_m)
     scenarios: list[LeadScenario] = []
     for index, shape_key in enumerate(shapes):
         shape = BY_SHAPE[shape_key]
-        _band_key, (min_g, max_g, band_label) = scenario_weight_band(index, holding, wave_height_m)
+        min_g, max_g, band_label = _clamped_band(_scenario_band_key(index, load_key))
         scenarios.append(
             LeadScenario(
                 shape=shape.shape,
@@ -242,6 +283,10 @@ def recommend_gear(
         note_parts.append("قابلية الصوفة مرتفعة: ابدأ برمية اختبارية قبل نصب العتاد الكامل.")
     if dominant == "longshore_current":
         note_parts.append("ارمِ بزاوية مائلة عكس اتجاه الجرّ الجانبي.")
+    if beyond_cap:
+        note_parts.append(
+            "الحمل عند القاع يتجاوز ما يثبته رصاص ضمن حد القصبة؛ لا تنصب على هذه الساعات."
+        )
 
     return GearRecommendation(
         scenarios=scenarios,
@@ -253,5 +298,7 @@ def recommend_gear(
             "مجالات وزن تقريبية من كتالوج عام؛ لا رقم دقيق بلا بيانات قصبة وخيط وقاع.",
             "القاع تحت الطعم غير معروف؛ النتيجة سيناريوهات متعددة وليست حكماً هندسياً.",
             "لا تُستعمل grapnel ثابت على قاع صخري غير معروف؛ احتمال التعليق مرتفع.",
+            f"حد القصبة المفترض {ROD_CAP_G} غ؛ لا يُقترح وزن فوقه.",
+            "الحمل مبني على الموج عند القاع على عمق 1.5 م (أسوأ حالة)، ولا يحسب التيار الجانبي بعد.",
         ],
     )

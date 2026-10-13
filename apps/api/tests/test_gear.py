@@ -111,3 +111,48 @@ def test_recommendation_lowers_confidence_on_missing_forcing() -> None:
         wind_speed_kmh=None,
     )
     assert missing.confidence <= full.confidence
+
+
+def test_orbital_velocity_selects_the_weight_band() -> None:
+    from spotdata.domain.gear import ROD_CAP_G, band_from_orbital_velocity
+
+    assert band_from_orbital_velocity(0.10) == "light"
+    assert band_from_orbital_velocity(0.20) == "medium"
+    assert band_from_orbital_velocity(0.40) == "heavy"
+    assert band_from_orbital_velocity(0.60) is None
+    assert ROD_CAP_G == 150
+
+
+def test_recommendation_follows_bottom_load_and_respects_rod_cap() -> None:
+    calm = recommend_gear(
+        holding=PotentialLevel.HIGH,
+        breakdown=_breakdown("none"),
+        fouling=PotentialLevel.LOW,
+        wave_height_m=0.6,
+        wind_speed_kmh=10.0,
+        orbital_velocity_ms=0.10,
+    )
+    assert calm.scenarios[0].weight_max_g <= 90
+
+    rough = recommend_gear(
+        holding=PotentialLevel.LOW,
+        breakdown=_breakdown("none"),
+        fouling=PotentialLevel.LOW,
+        wave_height_m=1.2,
+        wind_speed_kmh=20.0,
+        orbital_velocity_ms=0.40,
+    )
+    # Holding says LOW, but the bottom load wins: the lead must not be light.
+    assert rough.scenarios[0].weight_min_g >= 100
+    assert all(scenario.weight_max_g <= 150 for scenario in rough.scenarios)
+
+    beyond = recommend_gear(
+        holding=PotentialLevel.HIGH,
+        breakdown=_breakdown("longshore_current"),
+        fouling=PotentialLevel.LOW,
+        wave_height_m=2.5,
+        wind_speed_kmh=30.0,
+        orbital_velocity_ms=0.80,
+    )
+    assert all(scenario.weight_max_g <= 150 for scenario in beyond.scenarios)
+    assert "لا تنصب" in beyond.casting_advice_ar

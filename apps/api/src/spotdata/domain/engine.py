@@ -2952,12 +2952,25 @@ class DecisionEngine:
             for item in covered
             if item.forecast.wind_speed_kmh is not None
         ]
+        # Bottom load: the worst covered hour at the shallow reference depth
+        # (conservative; the lead must hold where the bottom moves most).
+        orbital_values = [
+            velocity
+            for velocity in (
+                near_bottom_orbital_velocity_ms(
+                    item.forecast.wave_height_m, item.forecast.wave_period_s, 1.5
+                )
+                for item in covered
+            )
+            if velocity is not None
+        ]
         return recommend_gear(
             holding=field_feasibility.holding_difficulty,
             breakdown=field_feasibility.holding_breakdown,
             fouling=field_feasibility.fouling_transport_potential,
             wave_height_m=max(wave_values) if wave_values else None,
             wind_speed_kmh=max(wind_values) if wind_values else None,
+            orbital_velocity_ms=max(orbital_values) if orbital_values else None,
         )
 
     def _fouling_evidence(

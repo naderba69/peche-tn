@@ -518,6 +518,14 @@ def _activity_basis_ar(profile: SpeciesProfile) -> list[str]:
     return lines
 
 
+class InternalConsistencyError(RuntimeError):
+    """Raised when hourly safety and recommended windows contradict each other.
+
+    This is a bug, not a forecast. It must surface instead of being shown as a
+    plausible-looking NO_GO verdict.
+    """
+
+
 class DecisionEngine:
     """Safety-first, deterministic and explainable surfcasting guidance.
 
@@ -2910,6 +2918,11 @@ class DecisionEngine:
         a third headline state.
         """
         if not recommended:
+            if _has_clean_go_run(hourly):
+                raise InternalConsistencyError(
+                    "تناقض داخلي: توجد ساعات متتالية بلا موانع ولا تُعرض أي نافذة؛ "
+                    "لا يُصدر قرار حتى يُصحح الخلل."
+                )
             if hourly and all(
                 any(factor.code == "forecast_horizon_exceeded" for factor in item.factors)
                 for item in hourly
@@ -5434,3 +5447,21 @@ def _critical_factor_labels(hours: Iterable[HourDecision]) -> list[str]:
         if factor.severity == RiskSeverity.CRITICAL or factor.impact == FactorImpact.DATA_GAP
     ]
     return _unique(labels)
+
+
+def _has_clean_go_run(hourly: list[HourDecision]) -> bool:
+    """True when two consecutive hours are GO-safety with no calculated blocker."""
+    run = 0
+    previous: HourDecision | None = None
+    for item in hourly:
+        clean = item.safety == DecisionLevel.GO and not _hour_has_calculated_blocker(item)
+        if clean and previous is not None and _is_consecutive([previous, item]):
+            run += 1
+        elif clean:
+            run = 1
+        else:
+            run = 0
+        if run >= MIN_OPEN_WINDOW_HOURS:
+            return True
+        previous = item
+    return False

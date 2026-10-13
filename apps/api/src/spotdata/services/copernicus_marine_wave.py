@@ -10,6 +10,7 @@ Credentials are never logged. Any failure returns ``None`` so the forecast is ne
 from __future__ import annotations
 
 import asyncio
+import importlib
 import importlib.util
 import logging
 import math
@@ -85,7 +86,7 @@ def hourly_from_dataset(dataset: Any, latitude: float, longitude: float) -> dict
 
     Separated from the network call so the conversion is testable offline.
     """
-    import numpy as np
+    np: Any = importlib.import_module("numpy")  # numpy ships with the optional extra only
 
     try:
         point = dataset.sel(latitude=latitude, longitude=longitude, method="nearest")

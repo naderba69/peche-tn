@@ -19,6 +19,7 @@ from spotdata.domain.models import (
 )
 from spotdata.services.aviation_weather import TUNISIA_METAR_STATIONS, parse_nearest_metar
 from spotdata.services.cache import AsyncTTLCache
+from spotdata.services.copernicus_marine_wave import CopernicusWaveClient
 
 LOGGER = logging.getLogger(__name__)
 TUNIS_TZ = ZoneInfo("Africa/Tunis")
@@ -123,6 +124,7 @@ class _UpstreamBundle:
     # Optional second model family, used only to fill gaps. None when disabled/unavailable.
     secondary_marine: dict[str, Any] | None = None
     secondary_weather: dict[str, Any] | None = None
+    copernicus_marine: dict[str, Any] | None = None
 
 
 class OpenMeteoClient:
@@ -136,8 +138,10 @@ class OpenMeteoClient:
         stale_seconds: float = _STALE_BUNDLE_SECONDS,
         secondary_marine_model: str = "",
         secondary_weather_model: str = "",
+        copernicus_client: CopernicusWaveClient | None = None,
     ) -> None:
         self._http = http_client
+        self._copernicus = copernicus_client
         self._weather_url = weather_url
         self._marine_url = marine_url
         self._observation_url = observation_url
@@ -229,6 +233,7 @@ class OpenMeteoClient:
             secondary_marine_model=self._secondary_marine_model or None,
             secondary_weather=bundle.secondary_weather,
             secondary_weather_model=self._secondary_weather_model or None,
+            copernicus_marine=bundle.copernicus_marine,
         )
 
     async def _fetch_bundle(
@@ -261,6 +266,16 @@ class OpenMeteoClient:
             if self._secondary_weather_model
             else asyncio.sleep(0, result=None)
         )
+        copernicus_task = (
+            self._copernicus.hourly_for_point(
+                float(marine_params["latitude"]),
+                float(marine_params["longitude"]),
+                date.fromisoformat(str(marine_params["start_date"])),
+                date.fromisoformat(str(marine_params["end_date"])),
+            )
+            if self._copernicus is not None and self._copernicus.enabled
+            else asyncio.sleep(0, result=None)
+        )
         try:
             (
                 marine_result,
@@ -268,12 +283,14 @@ class OpenMeteoClient:
                 metar_result,
                 secondary_marine,
                 secondary_weather,
+                copernicus_marine,
             ) = await asyncio.gather(
                 self._get_json(self._marine_url, marine_params, "البحر"),
                 self._get_json(self._weather_url, weather_params, "الطقس"),
                 observation_task,
                 secondary_marine_task,
                 secondary_weather_task,
+                copernicus_task,
             )
         except UpstreamDataError:
             raise
@@ -286,6 +303,7 @@ class OpenMeteoClient:
             retrieved_at=datetime.now(TUNIS_TZ),
             secondary_marine=secondary_marine,
             secondary_weather=secondary_weather,
+            copernicus_marine=copernicus_marine,
         )
 
     async def _get_optional_json(
@@ -395,6 +413,7 @@ def parse_open_meteo(
     secondary_marine_model: str | None = None,
     secondary_weather: dict[str, Any] | None = None,
     secondary_weather_model: str | None = None,
+    copernicus_marine: dict[str, Any] | None = None,
 ) -> ForecastDataset:
     marine_hourly = _object(marine.get("hourly"), "marine.hourly")
     weather_hourly = _object(weather.get("hourly"), "weather.hourly")
@@ -405,6 +424,11 @@ def parse_open_meteo(
     marine_hourly, marine_filled = _fill_hourly_gaps(
         marine_hourly, marine_index, secondary_marine, MARINE_VARIABLES
     )
+    marine_hourly, copernicus_filled = _fill_hourly_gaps(
+        marine_hourly, marine_index, copernicus_marine, MARINE_VARIABLES
+    )
+    for raw_name, times in copernicus_filled.items():
+        marine_filled.setdefault(raw_name, set()).update(times)
     weather_hourly, weather_filled = _fill_hourly_gaps(
         weather_hourly, weather_index, secondary_weather, WEATHER_VARIABLES
     )
@@ -513,6 +537,21 @@ def parse_open_meteo(
                 limitations_ar=[
                     "استُعمل هذا النموذج فقط لملء قيم فارغة في النموذج الأساسي، ولا يحلّ محله.",
                     "نموذج مختلف المؤسسة/الشبكة يرفع التنوع، لكنه لا يعني تحققاً ميدانياً من الموج داخل الكسرة.",
+                ],
+            )
+        )
+    if copernicus_filled:
+        sources.append(
+            SourceMetadata(
+                provider="Copernicus Marine Service (Med-WAV)",
+                product="MEDSEA_ANALYSISFORECAST_WAV_006_017 cmems_mod_med_wav_anfc_4.2km_PT1H-i (gap-fill فقط)",
+                data_kind="model_forecast",
+                variables=list(copernicus_filled),
+                horizontal_resolution_km=4.2,
+                retrieved_at=retrieved_at,
+                limitations_ar=[
+                    "استُعمل هذا المصدر فقط لملء قيم بحرية فارغة في النموذجين الآخرين، ولا يحلّ محلهما.",
+                    "النموذج يدمج قياسات أقمار صناعية للموج والريح، لكنه ليس قياساً داخل الكسرة أو عند نقطة الصيد.",
                 ],
             )
         )

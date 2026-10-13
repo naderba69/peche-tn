@@ -26,6 +26,9 @@ class Settings:
     # Open-Meteo blend. Empty string disables the secondary fetch entirely.
     secondary_marine_model: str = "meteofrance_wave"
     secondary_weather_model: str = "icon_seamless"
+    # Copernicus Marine credentials (optional). Used only if the `copernicus` extra is installed.
+    copernicus_username: str | None = None
+    copernicus_password: str | None = None
 
     @classmethod
     def from_env(cls) -> Settings:
@@ -58,6 +61,8 @@ class Settings:
             secondary_marine_model=os.getenv(
                 "OPEN_METEO_SECONDARY_MARINE_MODEL", "meteofrance_wave"
             ).strip(),
+            copernicus_username=os.getenv("COPERNICUSMARINE_SERVICE_USERNAME") or None,
+            copernicus_password=os.getenv("COPERNICUSMARINE_SERVICE_PASSWORD") or None,
             secondary_weather_model=os.getenv(
                 "OPEN_METEO_SECONDARY_WEATHER_MODEL", "icon_seamless"
             ).strip(),

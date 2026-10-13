@@ -307,21 +307,33 @@ async def generate_gemini_report(
 FETCH_SEARCH_RADIUS_M = 30_000
 
 
-async def _wave_fetch_diagnostic(
-    coast_client: CoastOrientationClient,
+FETCH_DIAGNOSTIC_TIMEOUT_SECONDS = 8.0
+
+
+async def _coastline_for_diagnostic(
+    coast_client: CoastOrientationClient, payload: ForecastDecisionRequest
+) -> tuple[tuple[tuple[float, float], tuple[float, float]], ...] | None:
+    """Bounded, optional geometry lookup. Runs in parallel with the forecast."""
+    try:
+        return await asyncio.wait_for(
+            coast_client.coastline_segments(
+                payload.location.latitude,
+                payload.location.longitude,
+                FETCH_SEARCH_RADIUS_M,
+            ),
+            timeout=FETCH_DIAGNOSTIC_TIMEOUT_SECONDS,
+        )
+    except Exception as exc:  # diagnostic only: never delay or break the decision
+        LOGGER.warning("wave fetch diagnostic geometry skipped: %s", type(exc).__name__)
+        return None
+
+
+def _wave_fetch_diagnostic(
     payload: ForecastDecisionRequest,
     decision: DecisionResponse,
+    segments: tuple[tuple[tuple[float, float], tuple[float, float]], ...] | None,
 ) -> WaveFetchDiagnostic:
     """Diagnostic attached after the decision. Failure here never affects the decision."""
-    try:
-        segments = await coast_client.coastline_segments(
-            payload.location.latitude,
-            payload.location.longitude,
-            FETCH_SEARCH_RADIUS_M,
-        )
-    except Exception as exc:  # diagnostic only: never break the decision
-        LOGGER.warning("wave fetch diagnostic skipped: %s", type(exc).__name__)
-        segments = None
     return build_wave_fetch_diagnostic(
         latitude=payload.location.latitude,
         longitude=payload.location.longitude,
@@ -406,10 +418,15 @@ async def forecast_decision(
             )
 
     try:
-        dataset, water_context = await asyncio.gather(
-            client.forecast_dataset(verified_payload),
-            optional_water_context(),
-        )
+        fetch_task = asyncio.create_task(_coastline_for_diagnostic(coast_client, verified_payload))
+        try:
+            dataset, water_context = await asyncio.gather(
+                client.forecast_dataset(verified_payload),
+                optional_water_context(),
+            )
+        except BaseException:
+            fetch_task.cancel()
+            raise
         sources = list(dataset.sources)
         if water_context.availability == "available":
             variables = [
@@ -472,7 +489,7 @@ async def forecast_decision(
             update={"coastal_water_context": water_context, "sources": sources}
         )
         decision = engine.evaluate(dataset)
-        wave_fetch = await _wave_fetch_diagnostic(coast_client, verified_payload, decision)
+        wave_fetch = _wave_fetch_diagnostic(verified_payload, decision, await fetch_task)
         return decision.model_copy(
             update={
                 "spot_profile": verified_spot,

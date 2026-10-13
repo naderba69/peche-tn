@@ -1187,3 +1187,25 @@ def test_user_bottom_type_adds_info_only_advisory(
     assert rock_factor and rock_factor[0].severity.value == "info"
     assert rock.decision == plain.decision
     assert not any(f.code == "bottom_rock_snag_advisory" for f in plain.hourly[0].factors)
+
+
+def test_clean_go_run_without_window_is_an_internal_error_not_a_verdict(
+    dataset_factory: Callable[..., ForecastDataset],
+) -> None:
+    from spotdata.domain.engine import InternalConsistencyError, _has_clean_go_run
+
+    def calm(index: int, values: dict[str, object]) -> None:
+        values["wave_height_m"] = 0.3
+        values["wave_period_s"] = 4.0
+        values["wind_speed_kmh"] = 8.0
+
+    result = engine.evaluate(dataset_factory(per_hour=calm, count=48))
+    hours = result.hourly
+    assert _has_clean_go_run(hours)
+    with pytest.raises(InternalConsistencyError):
+        engine._day_decision(
+            hours,
+            [],
+            hours[0].field_feasibility,
+            hours[0].confidence,
+        )

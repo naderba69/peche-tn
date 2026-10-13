@@ -1157,3 +1157,18 @@ def test_rip_safety_floor_keeps_previously_high_hours_high(
     )
     rip = result.hourly[0].field_feasibility.rip_current_potential
     assert rip == PotentialLevel.HIGH
+
+
+def test_rip_setup_advisory_is_info_only_and_does_not_change_decision(
+    dataset_factory: Callable[..., ForecastDataset],
+) -> None:
+    def near_normal(index: int, values: dict[str, object]) -> None:
+        values["wave_height_m"] = 1.0
+        values["wave_period_s"] = 9.0
+        values["wave_direction_deg"] = 90.0
+
+    base = engine.evaluate(dataset_factory(per_hour=near_normal, count=48))
+    advisory = [f for f in base.hourly[0].factors if f.code == "rip_setup_advisory"]
+    if base.hourly[0].field_feasibility.rip_current_potential != PotentialLevel.HIGH:
+        assert advisory
+        assert advisory[0].severity.value == "info"

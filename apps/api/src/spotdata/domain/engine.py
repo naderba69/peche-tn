@@ -1331,6 +1331,8 @@ class DecisionEngine:
         else:
             turbidity = PotentialLevel.UNKNOWN
 
+        # [C] Shoreline estimate, NOT calibrated: 0.7 m / 5 s / 1.2 m thresholds are
+        # site-dependent in the literature (see report section 10). Keep as estimate.
         # Rip current = intersection of drivers, not a sum. HIGH needs all of:
         #   A) breaking waves (Hs >= 0.7 m),
         #   B) plunging long-period waves (T >= 5 s),
@@ -1977,6 +1979,28 @@ class DecisionEngine:
                     RiskSeverity.CAUTION,
                     f"{hour.wave_height_m:.2f} م / هبّات {hour.wind_gust_kmh:.0f} كم/س",
                     "تزامن الريح البحرية والموج يرفع التحفظ؛ لا يحسب ارتفاع الكسرة أو التيار الراجع محلياً.",
+                    basis=FactorBasis.DERIVED_FORECAST,
+                    rule_nature=RuleNature.OPERATIONAL_PROXY,
+                )
+            )
+
+        # INFO-only advisory [C]: near-normal long-period surf is cited in the literature
+        # as favouring rip currents. It never sets caution or changes the decision.
+        if (
+            field_feasibility.rip_current_potential != PotentialLevel.HIGH
+            and derived.wave_incidence == WaveIncidence.DIRECT
+            and hour.wave_height_m is not None
+            and hour.wave_period_s is not None
+            and hour.wave_height_m >= 1.0
+            and hour.wave_period_s >= 8
+        ):
+            factors.append(
+                _risk_factor(
+                    "rip_setup_advisory",
+                    "إرشاد: موج شبه عمودي وطويل الفترة",
+                    RiskSeverity.INFO,
+                    f"{hour.wave_height_m:.2f} م / {hour.wave_period_s:.0f} ث",
+                    "قد يرفع هذا احتمال التيار الساحب في شواطئ معينة؛ العتبة غير معايَرة لهذا الشاطئ، ولا تغيّر القرار.",
                     basis=FactorBasis.DERIVED_FORECAST,
                     rule_nature=RuleNature.OPERATIONAL_PROXY,
                 )

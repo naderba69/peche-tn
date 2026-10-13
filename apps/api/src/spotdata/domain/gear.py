@@ -232,14 +232,20 @@ def recommend_gear(
     wave_height_m: float | None,
     wind_speed_kmh: float | None,
     orbital_velocity_ms: float | None = None,
+    longshore_current_ms: float | None = None,
 ) -> GearRecommendation:
     dominant = getattr(breakdown, "dominant", "none")
     breakdown_conf = getattr(breakdown, "confidence", 0) if breakdown is not None else 0
     shapes = primary_shapes_for(dominant)
     montage = montage_class_for(holding)
     beyond_cap = False
-    if orbital_velocity_ms is not None:
-        load_key = band_from_orbital_velocity(orbital_velocity_ms)
+    # Bottom load = the stronger of the wave-driven bottom motion and the
+    # longshore drag. The longshore value is the model current projected on the
+    # coast: a LOWER bound for the surf zone, so it can only raise the load.
+    load_candidates = [v for v in (orbital_velocity_ms, longshore_current_ms) if v is not None]
+    load_velocity = max(load_candidates) if load_candidates else None
+    if load_velocity is not None:
+        load_key = band_from_orbital_velocity(load_velocity)
         if load_key is None:
             beyond_cap = True
             load_key = "heavy"
@@ -299,6 +305,6 @@ def recommend_gear(
             "القاع تحت الطعم غير معروف؛ النتيجة سيناريوهات متعددة وليست حكماً هندسياً.",
             "لا تُستعمل grapnel ثابت على قاع صخري غير معروف؛ احتمال التعليق مرتفع.",
             f"حد القصبة المفترض {ROD_CAP_G} غ؛ لا يُقترح وزن فوقه.",
-            "الحمل مبني على الموج عند القاع على عمق 1.5 م (أسوأ حالة)، ولا يحسب التيار الجانبي بعد.",
+            "الحمل = الأكبر بين الموج عند القاع على عمق 1.5 م والتيار النموذجي الموازي للشاطئ؛ التيار النموذجي حد أدنى لتيار منطقة الكسر.",
         ],
     )

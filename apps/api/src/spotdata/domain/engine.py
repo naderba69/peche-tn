@@ -2952,6 +2952,13 @@ class DecisionEngine:
             for item in covered
             if item.forecast.wind_speed_kmh is not None
         ]
+        # Model current projected along the coast, km/h -> m/s (worst covered hour).
+        along_values = [
+            abs(item.derived.current_alongshore_kmh) / 3.6
+            for item in covered
+            if item.derived.current_alongshore_kmh is not None
+        ]
+        longshore_current_ms = max(along_values) if along_values else None
         # Bottom load: the worst covered hour at the shallow reference depth
         # (conservative; the lead must hold where the bottom moves most).
         orbital_values = [
@@ -2971,6 +2978,7 @@ class DecisionEngine:
             wave_height_m=max(wave_values) if wave_values else None,
             wind_speed_kmh=max(wind_values) if wind_values else None,
             orbital_velocity_ms=max(orbital_values) if orbital_values else None,
+            longshore_current_ms=longshore_current_ms,
         )
 
     def _fouling_evidence(

@@ -156,3 +156,36 @@ def test_recommendation_follows_bottom_load_and_respects_rod_cap() -> None:
     )
     assert all(scenario.weight_max_g <= 150 for scenario in beyond.scenarios)
     assert "لا تنصب" in beyond.casting_advice_ar
+
+
+def test_longshore_current_can_raise_the_load_but_never_lower_it() -> None:
+    calm_wave = recommend_gear(
+        holding=PotentialLevel.LOW,
+        breakdown=_breakdown("longshore_current"),
+        fouling=PotentialLevel.LOW,
+        wave_height_m=0.5,
+        wind_speed_kmh=12.0,
+        orbital_velocity_ms=0.10,
+    )
+    strong_current = recommend_gear(
+        holding=PotentialLevel.LOW,
+        breakdown=_breakdown("longshore_current"),
+        fouling=PotentialLevel.LOW,
+        wave_height_m=0.5,
+        wind_speed_kmh=12.0,
+        orbital_velocity_ms=0.10,
+        longshore_current_ms=0.35,
+    )
+    assert calm_wave.scenarios[0].weight_max_g <= 90
+    assert strong_current.scenarios[0].weight_min_g >= 100
+    # A weak current must not lower a heavier wave-driven load.
+    weak_current = recommend_gear(
+        holding=PotentialLevel.LOW,
+        breakdown=_breakdown("longshore_current"),
+        fouling=PotentialLevel.LOW,
+        wave_height_m=0.5,
+        wind_speed_kmh=12.0,
+        orbital_velocity_ms=0.40,
+        longshore_current_ms=0.05,
+    )
+    assert weak_current.scenarios[0].weight_min_g >= 150

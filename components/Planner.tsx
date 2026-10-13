@@ -261,6 +261,26 @@ export function Planner({ value, loading, error, hasResult, isDirty, onChange, o
       ? shoreProfile
       : null;
   const shoreProfileVerified = Boolean(resolvedShoreProfile);
+  // Explain exactly which verified-orientation rule blocks submission. Thresholds are
+  // unchanged; the user sees the fetched value and the failing condition, not a bare lock.
+  const orientationBlockers: string[] = [];
+  if (!orientationEvidence) {
+    orientationBlockers.push("لم يُعتمد دليل الاتجاه من OSM لهذه النقطة");
+  } else {
+    if (orientationEvidence.confidence !== "high") {
+      orientationBlockers.push(`ثقة الهندسة ${orientationConfidenceLabel ?? "غير معروفة"} وليست مرتفعة`);
+    }
+    if (orientationEvidence.coastline_distance_m > 500) {
+      orientationBlockers.push(
+        `النقطة تبعد ${Math.round(orientationEvidence.coastline_distance_m)} م عن خط الساحل (الحد 500 م)`,
+      );
+    }
+    if (orientationEvidence.segments_used < 3) {
+      orientationBlockers.push(
+        `عدد مقاطع الساحل المستخدمة ${orientationEvidence.segments_used} (المطلوب 3 على الأقل)`,
+      );
+    }
+  }
   // اختيار البقعة وجلب اتجاه ساحل موثق يكفي لبدء التحليل. نوع الساحل اليدوي
   // مدخل يقدمه المستخدم بوضوح، وليس رصداً أو وسم OSM.
   const decisionContextVerified = orientationVerified;
@@ -270,7 +290,9 @@ export function Planner({ value, loading, error, hasResult, isDirty, onChange, o
     : !orientationVerified
       ? orientationLoading
         ? "نجلب اتجاه الساحل الموثق…"
-        : "محجوب: اتجاه الساحل غير موثق"
+        : orientationBlockers.length > 0
+          ? "محجوب: اتجاه الساحل لم يحقق شرط التوثيق"
+          : "محجوب: اتجاه الساحل غير موثق"
       : isDirty
         ? "حدّث التقرير والقرار"
         : hasResult
@@ -467,6 +489,18 @@ export function Planner({ value, loading, error, hasResult, isDirty, onChange, o
                 <bdi>{orientationEvidence.server}</bdi>
               </p>
               {orientationEvidence.limitations_ar.map((item) => <p key={item}><Info size={14} /> {item}</p>)}
+            </div>
+          )}
+          {!orientationVerified && orientationBlockers.length > 0 && orientationEvidence && (
+            <div className="field-message warning" data-testid="orientation-blockers">
+              <Info size={16} />
+              <span>
+                <strong>
+                  الاتجاه المحسوب {orientationEvidence.orientation_deg}° موجود، لكنه لا يكفي للتوثيق بعد:
+                </strong>{" "}
+                {orientationBlockers.join("؛ ")}. حرّك الدبوس إلى موضع أقرب لخط الساحل ثم أعد الحساب.
+                القواعد لم تتغير.
+              </span>
             </div>
           )}
           {orientationError && (

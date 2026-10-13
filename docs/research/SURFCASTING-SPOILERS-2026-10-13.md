@@ -185,3 +185,28 @@
 - حد القصبة 150 غ افتراض عام، لا يُدخل المستخدم قدرة قصبته.
 - الشكل (هرمي، grapnel، قربان) ما زال يُختار من السبب الغالب للجرّ، كما كان.
 - النطاقات لم تُعايَر على خرجات حقيقية، وتبقى [C] حتى يحدث ذلك.
+
+---
+
+## 9. المصادر المنشورة لكل قاعدة (تحقق بالبحث، أكتوبر 2026)
+
+| القاعدة في المحرك | المصدر المنشور | ما يقوله المصدر | الحالة |
+|---|---|---|---|
+| الحركة المدارية عند القاع | نظرية الموجة الخطية (CEM) | Ub = π·H / (T·sinh(k·h)) | **مؤكد** ([CERC/CEM](https://coastalengineeringmanual.tpub.com/Part-II-Chap4/Part-II-Chap40025.htm)) |
+| التيار الشاطئي (تقدير الوسط) | Komar & Inman (1970) في CEM | V ≈ 1.17 · √(g·H) · sinα · cosα | **مؤكد للصيغة**؛ ثابت المعايرة 1.17 منشور لكن يحتاج تطبيقه على خط الكسر (زاوية الموج عند الكسر، وليس عند العمق البعيد) ([CEM](https://coastalengineeringmanual.tpub.com/Part-II-Chap4/Part-II-Chap40025.htm)) |
+| بداية حركة الرمل بالموج | van Rijn، صيغ نقل الرمل | الحد الحرج لسرعة الموج القاعية حوالي **0.27 م/ث** لرمل 0.1 مم، و**0.30 م/ث** لرمل 0.5 مم | **تصحيح مهم**: قيمة 0.15 في الكود أقل بكثير من المنشور ([van Rijn](https://www.leovanrijn-sediment.com/papers/Formulaesandtransport.pdf)) |
+| حدود أعلى للحد الحرج | مراجعة عيّنات الرمل والطين | الحدود تتراوح بين 0.021 و0.065 لمعامل Shields حسب الحجم والتدفق | عدم يقين مؤكد ([ScienceDirect](https://www.sciencedirect.com/science/article/pii/S1001627923000756)) |
+| تثبيت الرصاص الهرمي في الرمل | تجارب الصيد | لا توجد دراسة منشورة تقيس قوة تثبيت الرصاص | **غير موجود في المصادر**؛ الهرمي معيار صيادين [B] ([Tackle Room](https://thetackleroom.com/blogs/news/sinker-weight-guide)) |
+| عتبة الوزن بالموج والتيار | متاجر وأدلة | 3–6 أوقية للشاطئ، 6–8 للتيار القوي؛ +1 أوقية/قدم موج | [B]، لا دراسة منشورة |
+| العكارة وتأثيرها على الرؤية | Turbidity studies | مسافة الاكتشاف تنخفض من ~2 م إلى 23 سم عند 10 NTU | [A] ([ResearchGate](https://www.researchgate.net/publication/263152065_Effects_of_turbidity_on_prey_consumption_and_growth_in_brook_trout_and_implications_for_bioenergetics_modeling)) |
+| الكسّارات المنهارة والتعليق | Vejers beach study | الكسّارات الطويلة المنهارة تعلّق رمالاً أكثر | [A] ([ResearchGate](https://www.researchgate.net/publication/259850862_Breaker_turbulence_and_sediment_suspension_in_the_surf_zone)) |
+| الأوساخ بعد العواصف | Posidonia beach-cast study | تتكون عند Hs > 1 م وتظهر بعد انخفاض الموج | [A] ([ResearchGate](https://www.researchgate.net/publication/245022493_Posidonia_oceanica_beach-cast_litter_in_Mediterranean_beaches_A_coastal_videomonitoring_study)) |
+| حرارة القاروص | Aquaculture studies | النمو المثالي 22–28 م؛ الإجهاد عند 8 و32 م | [A، استزراع] ([ScienceDirect](https://www.sciencedirect.com/science/article/abs/pii/S0044848619320472)) |
+| الضغط الجوي | مراجعات الصيد | الأدلة ضعيفة؛ نفاخة السمك بطيئة | [C] ([InTheSpread](https://inthespread.com/blog/barometric-pressure-saltwater-fishing-science-behind-the-bite-394)) |
+
+### ما وجدته ويغيّر الكود
+1. **عتبة 0.15 م/ث في الكود** (لاختيار الوزن الخفيف) أقل من الحد المنشور لحركة الرمل (0.27–0.30 م/ث). هذا يعني أن الكود يعتبر الرمل متحركاً عند سرعات لا تحركه وفق van Rijn. الأصح أن ترفع العتبات إلى 0.27 و0.30 م/ث، أو تُبقي 0.15 مع التسمية كـ«حد احترازي» وسببها.
+2. **الصيغة الدقيقة للتيار الشاطئي** موجودة منشورة (Komar & Inman)، لكن تحتاج زاوية الكسر، ونحن لدينا زاوية الموج في عمق بعيد. لذلك تبقى تقديراً [C].
+3. **لا يوجد مصدر منشور لوزن الرصاص المطلوب للتثبيت.** الحدود الحالية كلها [B] أو [C].
+
+**الخلاصة:** ما يمكن قوله بثقة الآن: معادلة الحركة عند القاع والتيار الشاطئي منشورة، وحد حركة الرمل منشور بقيمة أعلى من عتبتنا. أما الوزن المطلوب للتثبيت فلا يوجد له مصدر منشور، وهذا ما يجب أن يُذكر للمستخدم بوضوح.

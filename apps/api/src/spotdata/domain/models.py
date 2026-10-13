@@ -991,8 +991,13 @@ class DecisionResponse(StrictModel):
 
     @model_validator(mode="after")
     def headline_decision_is_binary_and_ledger_is_complete(self) -> DecisionResponse:
-        if self.decision not in {DecisionLevel.GO, DecisionLevel.NO_GO}:
-            raise ValueError("headline decision must be binary")
+        if self.decision not in {DecisionLevel.GO, DecisionLevel.CAUTION, DecisionLevel.NO_GO}:
+            raise ValueError("headline decision must be GO, CAUTION or NO_GO")
+        if self.decision == DecisionLevel.CAUTION and (
+            self.decision_reason_code != DecisionReasonCode.CAUTION_ONLY_WINDOWS
+            or not self.recommended_windows
+        ):
+            raise ValueError("CAUTION requires CAUTION_ONLY_WINDOWS and at least one window")
         if (
             self.decision == DecisionLevel.GO
             and self.decision_reason_code != DecisionReasonCode.SAFE_WINDOW
@@ -1007,9 +1012,13 @@ class DecisionResponse(StrictModel):
             raise ValueError("GO requires at least one recommended gate-passing window")
         if self.decision == DecisionLevel.NO_GO and self.recommended_windows:
             raise ValueError("NO_GO cannot expose a recommended window")
-        expected_label = "اذهب" if self.decision == DecisionLevel.GO else "لا تذهب"
+        expected_label = {
+            DecisionLevel.GO: "اذهب",
+            DecisionLevel.CAUTION: "حذر",
+            DecisionLevel.NO_GO: "لا تذهب",
+        }[self.decision]
         if self.decision_label_ar != expected_label:
-            raise ValueError("headline decision label must be the exact binary Arabic label")
+            raise ValueError("headline decision label must be the exact Arabic label")
         if len(self.factor_assessments) != 63:
             raise ValueError("factor assessment ledger must contain all 63 matrix factors")
         if len({item.matrix_id for item in self.factor_assessments}) != 63:

@@ -56,7 +56,7 @@ function VerdictStrip({
   let label = "لم يُحسب القرار بعد";
   if (loading) label = "جارٍ حساب القرار…";
   else if (result && "hourly" in result) {
-    tone = result.decision === "go" ? "go" : "no-go";
+    tone = result.decision === "go" ? "go" : result.decision === "caution" ? "caution" : "no-go";
     label = result.decision_label_ar;
   } else if (result) {
     tone = "no-go";

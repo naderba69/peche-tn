@@ -122,6 +122,7 @@ class DecisionReasonCode(StrEnum):
     SAFETY_HAZARD = "safety_hazard"
     FIELD_INFEASIBLE = "field_infeasible"
     CRITICAL_DATA_MISSING = "critical_data_missing"
+    CAUTION_ONLY_WINDOWS = "caution_only_windows"
     CONSERVATIVE_UNCERTAINTY = "conservative_uncertainty"
     FOULING_CONFIRMED = "fouling_confirmed"
     FOULING_PROXY_RISK = "fouling_proxy_risk"

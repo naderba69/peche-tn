@@ -1,10 +1,12 @@
 export type DecisionLevel = "go" | "caution" | "no_go" | "unknown";
 export type BinaryDecision = "go" | "no_go";
+export type HeadlineDecision = "go" | "caution" | "no_go";
 export type DecisionReasonCode =
   | "safe_window"
   | "safety_hazard"
   | "field_infeasible"
   | "critical_data_missing"
+  | "caution_only_windows"
   | "conservative_uncertainty"
   | "fouling_confirmed"
   | "fouling_proxy_risk"
@@ -586,7 +588,7 @@ export interface RankedSpot {
   name_ar: string;
   spot_profile?: SpotProfile | null;
   automated_shore_profile?: AutomatedShoreProfile | null;
-  decision: BinaryDecision;
+  decision: HeadlineDecision;
   decision_reason_code: DecisionReasonCode;
   force_majeure_kind: ForceMajeureKind;
   best_window_start: string | null;
@@ -618,7 +620,7 @@ export interface RankSpotsResponse {
 export interface DecisionResponse {
   schema_version: "3.20";
   engine_version: string;
-  decision: BinaryDecision;
+  decision: HeadlineDecision;
   decision_reason_code: DecisionReasonCode;
   decision_label_ar: string;
   summary_ar: string;

@@ -1003,27 +1003,32 @@ def test_gear_recommendation_reflects_dominant_mechanism(
     assert recommendation.confidence <= 30
 
 
-def test_all_caution_day_is_no_go_without_a_go_window(
+def test_all_caution_day_is_caution_headline_with_warning_windows(
     dataset_factory: Callable[..., ForecastDataset],
 ) -> None:
-    # A caution-only day has no window that passes the safety gate.
+    # A caution-only day has no clean GO window, but no hard blocker either:
+    # the headline is CAUTION and the warned hours are exposed, never a silent NO_GO.
     result = engine.evaluate(
         dataset_factory(hour_updates={"wind_speed_kmh": 33.0, "wind_direction_deg": 90.0})
     )
     assert all(hour.safety == DecisionLevel.CAUTION for hour in result.hourly)
-    assert result.decision == DecisionLevel.NO_GO
-    assert result.decision_reason_code == DecisionReasonCode.CONSERVATIVE_UNCERTAINTY
-    assert result.recommended_windows == []
+    assert result.decision == DecisionLevel.CAUTION
+    assert result.decision_label_ar == "حذر"
+    assert result.decision_reason_code == DecisionReasonCode.CAUTION_ONLY_WINDOWS
+    assert result.recommended_windows
+    assert all(window.safety == DecisionLevel.CAUTION for window in result.recommended_windows)
+    assert "بتحذير" in result.summary_ar
 
 
-def test_high_uv_all_day_is_no_go_without_a_go_window(
+def test_high_uv_all_day_is_caution_without_a_go_window(
     dataset_factory: Callable[..., ForecastDataset],
 ) -> None:
     result = engine.evaluate(dataset_factory(hour_updates={"uv_index": 9.0}))
     assert all(hour.safety == DecisionLevel.CAUTION for hour in result.hourly)
-    assert result.decision == DecisionLevel.NO_GO
-    assert result.decision_reason_code == DecisionReasonCode.CONSERVATIVE_UNCERTAINTY
-    assert result.recommended_windows == []
+    assert result.decision == DecisionLevel.CAUTION
+    assert result.decision_reason_code == DecisionReasonCode.CAUTION_ONLY_WINDOWS
+    assert result.recommended_windows
+    assert all(window.safety == DecisionLevel.CAUTION for window in result.recommended_windows)
 
 
 def test_multiple_near_limit_cautions_escalate_to_no_go(
@@ -1050,16 +1055,17 @@ def test_multiple_near_limit_cautions_escalate_to_no_go(
     )
 
 
-def test_single_near_limit_caution_without_any_go_window_is_no_go(
+def test_single_near_limit_caution_without_any_go_window_is_caution(
     dataset_factory: Callable[..., ForecastDataset],
 ) -> None:
     result = engine.evaluate(
         dataset_factory(hour_updates={"wind_speed_kmh": 35.0, "wind_direction_deg": 90.0})
     )
     assert all(hour.safety == DecisionLevel.CAUTION for hour in result.hourly)
-    assert result.decision == DecisionLevel.NO_GO
-    assert result.decision_reason_code == DecisionReasonCode.CONSERVATIVE_UNCERTAINTY
-    assert result.recommended_windows == []
+    assert result.decision == DecisionLevel.CAUTION
+    assert result.decision_reason_code == DecisionReasonCode.CAUTION_ONLY_WINDOWS
+    assert result.recommended_windows
+    assert all(window.safety == DecisionLevel.CAUTION for window in result.recommended_windows)
 
 
 def test_alongshore_wind_channel_is_visible_to_the_holding_gate(

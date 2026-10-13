@@ -90,6 +90,7 @@ const holdingMechanismLabels: Record<string, string> = {
 
 const decisionReasonLabels = {
   safe_window: "نافذة اجتازت الحدود الآلية وقابلة للتنفيذ مبدئياً؛ ليست شهادة سلامة ميدانية",
+  caution_only_windows: "ساعات مفتوحة بتحذير احترازي فقط؛ لا توجد ساعة بلا تحذير",
   safety_hazard: "خطر سلامة",
   field_infeasible: "صعوبة مرتفعة متوقعة في تثبيت الخط",
   critical_data_missing: "نقص بيانات حرجة",

@@ -112,9 +112,9 @@ const decisionCopy: Record<DecisionLevel, { eyebrow: string; title: string; text
     text: "لا يوجد مانع محسوب في الساعات المعروضة. ضعف الترتيب النسبي لا يغيّر اذهب.",
   },
   caution: {
-    eyebrow: "حذر في ساعات — ليس قرار اليوم",
+    eyebrow: "ساعات مفتوحة بتحذير احترازي",
     title: "حذر",
-    text: "الحذر للساعة فقط. قرار اليوم يبقى اذهب أو لا تذهب حسب الموانع.",
+    text: "لا توجد ساعة اجتازت الحدود بلا تحذير. الساعات المعروضة مفتوحة بالتحذيرات الموضحة أدناه، وراقب البحر قبل الخروج.",
   },
   no_go: {
     eyebrow: "الأولوية للسلامة واليقين التنفيذي",
@@ -130,6 +130,7 @@ const decisionCopy: Record<DecisionLevel, { eyebrow: string; title: string; text
 
 const noGoCategory: Record<DecisionReasonCode, "safety" | "field" | "data" | "other"> = {
   safe_window: "other",
+  caution_only_windows: "other",
   safety_hazard: "safety",
   field_infeasible: "field",
   critical_data_missing: "data",
@@ -407,7 +408,7 @@ export function DecisionResult({ result, request, stale = false }: DecisionResul
           ) : (
             <div className="no-window"><TriangleAlert size={19} /><span><strong>{result.decision_context_ar?.length ? "ما صدرتش نافذة خروج نهائية." : "ما فماش نافذة اجتازت حدود المحرك."}</strong> {result.decision_context_ar?.join(" ") ?? "راجع أسباب القرار قبل التخطيط."}</span></div>
           )}
-          {result.decision === "go" && cautionFactors.length > 0 && (
+          {result.decision !== "no_go" && cautionFactors.length > 0 && (
             <div className="lead-cautions" role="note">
               <TriangleAlert size={15} />
               <span><strong>نقاط الحذر داخل النافذة:</strong> {cautionFactors.slice(0, 3).map((factor) => factor.explanation_ar).join(" · ")}</span>
@@ -439,7 +440,7 @@ export function DecisionResult({ result, request, stale = false }: DecisionResul
             {result.confidence.breakdown_ar[0] && <p className="confidence-cause">{result.confidence.breakdown_ar[0]}</p>}
           </div>
         </div>
-        <div className="not-probability"><Info size={15} /> {result.decision === "go" ? "الترتيب النسبي لا يغيّر اذهب. الساعات الممنوعة تبقى ممنوعة." : "لا تذهب بسبب مانع محسوب. لا ترتيب يفتح اليوم."}</div>
+        <div className="not-probability"><Info size={15} /> {result.decision === "go" ? "الترتيب النسبي لا يغيّر اذهب. الساعات الممنوعة تبقى ممنوعة." : result.decision === "caution" ? "حذر: الساعات المعروضة مفتوحة بتحذير، ولا ترتيب نسبي يلغيه." : "لا تذهب بسبب مانع محسوب. لا ترتيب يفتح اليوم."}</div>
       </header>
 
       <MiniReport result={result} />

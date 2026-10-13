@@ -123,14 +123,15 @@ def weight_band_for(
 ROD_CAP_G = 150
 
 
-# Bottom-load bands from the near-bed orbital velocity (m/s). The 0.15 m/s
-# floor is the sand-motion range used in the constitution (E7); the 0.30 and
-# 0.50 steps are estimates [C] to be calibrated against logged casts.
+# Bottom-load bands from the near-bed orbital velocity (m/s); see below.
 def band_from_orbital_velocity(u_ms: float) -> str | None:
     """Return the weight band a bottom load needs, or None beyond the rod cap."""
-    if u_ms < 0.15:
+    # 0.27 m/s: published start of sand motion (van Rijn, wave-driven, 0.1-0.5 mm).
+    # Below it the bed stays put and a light lead holds. 0.40 and 0.50 are
+    # estimates [C] pending calibration against logged casts.
+    if u_ms < 0.27:
         return "light"
-    if u_ms < 0.30:
+    if u_ms < 0.40:
         return "medium"
     if u_ms < 0.50:
         return "heavy"

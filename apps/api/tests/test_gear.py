@@ -117,8 +117,9 @@ def test_orbital_velocity_selects_the_weight_band() -> None:
     from spotdata.domain.gear import ROD_CAP_G, band_from_orbital_velocity
 
     assert band_from_orbital_velocity(0.10) == "light"
-    assert band_from_orbital_velocity(0.20) == "medium"
-    assert band_from_orbital_velocity(0.40) == "heavy"
+    assert band_from_orbital_velocity(0.26) == "light"
+    assert band_from_orbital_velocity(0.27) == "medium"
+    assert band_from_orbital_velocity(0.45) == "heavy"
     assert band_from_orbital_velocity(0.60) is None
     assert ROD_CAP_G == 150
 

@@ -182,14 +182,18 @@ async def test_unavailable_orientation_is_not_cached_against_manual_recalculatio
             httpx.Response(500),
             httpx.Response(
                 200,
-                json={"elements": coastline([(36.0, 10.0), (36.0, 10.01), (36.0, 10.02)])},
+                json={
+                    "elements": coastline(
+                        [(36.0, 10.0), (36.0, 10.01), (36.0, 10.02), (36.0, 10.03)]
+                    )
+                },
             ),
         ]
     )
     async with httpx.AsyncClient() as http_client:
         client = CoastOrientationClient(http_client=http_client, servers=(server,))
-        first = await client.resolve(35.995, 10.01)
-        second = await client.resolve(35.995, 10.01)
+        first = await client.resolve(35.9965, 10.015)
+        second = await client.resolve(35.9965, 10.015)
     assert first.status == "unavailable"
     assert second.status == "resolved"
     assert route.call_count == 4

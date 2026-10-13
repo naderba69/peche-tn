@@ -2805,7 +2805,13 @@ class DecisionEngine:
                     runs.append(current)
                 current = []
                 continue
-            if current and item.time - current[-1].time > timedelta(hours=1, minutes=5):
+            # A run must share one safety level. Otherwise a single CAUTION hour is
+            # merged into a GO run and the whole run is labelled CAUTION, which
+            # turns 14 clean GO hours into "no GO window" (the one-hour-spoils-day bug).
+            if current and (
+                item.time - current[-1].time > timedelta(hours=1, minutes=5)
+                or item.safety != current[-1].safety
+            ):
                 if len(current) >= MIN_OPEN_WINDOW_HOURS:
                     runs.append(current)
                 current = []

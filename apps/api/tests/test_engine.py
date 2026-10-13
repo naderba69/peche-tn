@@ -1209,3 +1209,29 @@ def test_clean_go_run_without_window_is_an_internal_error_not_a_verdict(
             hours[0].field_feasibility,
             hours[0].confidence,
         )
+
+
+def test_one_caution_stretch_does_not_erase_a_clean_go_run(
+    dataset_factory: Callable[..., ForecastDataset],
+) -> None:
+    # Regression for the Nabel page: calm morning GO hours followed by caution-only
+    # hours. The caution hours must not be merged into the GO run.
+    def per_hour(index: int, values: dict[str, object]) -> None:
+        values["wave_height_m"] = 0.3
+        values["wave_period_s"] = 4.0
+        values["wind_speed_kmh"] = 9.0
+        values["wind_direction_deg"] = 313.0
+        values["wave_direction_deg"] = 155.0
+        if index >= 12:
+            values["wave_height_m"] = 0.5
+            values["wave_direction_deg"] = 22.0
+
+    result = engine.evaluate(
+        dataset_factory(
+            per_hour=per_hour,
+            count=48,
+            spot_updates={"seaward_orientation_deg": 155.0, "shore_type": "sandy"},
+        )
+    )
+    assert any(window.safety == DecisionLevel.GO for window in result.recommended_windows)
+    assert result.decision == DecisionLevel.GO

@@ -118,7 +118,7 @@ from .species import (
 
 TUNIS_TZ = ZoneInfo("Africa/Tunis")
 
-ENGINE_VERSION = "1.11.7"
+ENGINE_VERSION = "1.12.0"
 
 # --------------------------------------------------------------------------- #
 # Trip-ruining factor thresholds (v1.9.8, evidence-gated; see SOURCES-AUDIT §3.6)
@@ -169,6 +169,44 @@ def _required_seaward_orientation(dataset: ForecastDataset) -> float:
     if orientation is None:
         raise InsufficientDataError("اتجاه الساحل Unknown؛ لا يمكن حساب التعرض دون مصدر موثق.")
     return orientation
+
+
+# Fields reported to the user when empty in part of the decision day.
+_GAP_REPORT_FIELDS: tuple[str, ...] = (
+    "wind_speed_kmh",
+    "wind_gust_kmh",
+    "wind_direction_deg",
+    "wave_height_m",
+    "wave_period_s",
+    "wave_direction_deg",
+    "swell_height_m",
+    "ocean_current_velocity_kmh",
+    "sea_level_height_msl_m",
+    "visibility_m",
+    "weather_code",
+    "pressure_msl_hpa",
+)
+
+
+def _data_gap_lines(hours: list[ForecastHour]) -> list[str]:
+    """Explain, per field, how many hours are empty or were gap-filled from a second model."""
+    total = len(hours)
+    if total == 0:
+        return []
+    lines: list[str] = []
+    for name in _GAP_REPORT_FIELDS:
+        missing = sum(1 for hour in hours if getattr(hour, name) is None)
+        filled = sum(1 for hour in hours if name in hour.gap_filled_fields)
+        if not missing and not filled:
+            continue
+        label = _FIELD_LABELS_AR.get(name, name)
+        parts: list[str] = []
+        if missing:
+            parts.append(f"فارغ في {missing} من {total} ساعة (غير متوفر، وليس صفراً)")
+        if filled:
+            parts.append(f"مُلئ من نموذج ثانٍ في {filled} ساعة")
+        lines.append(f"{label}: " + "؛ ".join(parts))
+    return lines
 
 
 _FIELD_LABELS_AR: dict[str, str] = {
@@ -561,19 +599,16 @@ class DecisionEngine:
             field_feasibility,
             confidence,
         )
+        # Missing shore type is a caution, not an automatic NO_GO: the safety gates use the
+        # most conservative wave multiplier (see policy.safety_thresholds), and the gear
+        # recommendation is withheld because it depends on the shore.
         shore_type_missing = dataset.spot.shore_type is None
         decision_context_ar: list[str] = []
         if shore_type_missing:
-            pre_gate_candidate_count = len(recommended)
             decision_context_ar.append(
-                f"قبل تطبيق مانع نوع الساحل، ظهرت {pre_gate_candidate_count} نافذة مرشحة من فحص الطقس والتنفيذ؛ "
-                "هذه ليست توصية خروج ولا GO نهائياً."
-                if pre_gate_candidate_count
-                else "قبل تطبيق مانع نوع الساحل، لم تظهر نافذة ساعات متصلة بلا موانع محسوبة."
+                "نوع الساحل غير موثّق (لا في OSM ولا يدوياً): حُسب القرار بأشد عتبة موج محافظة "
+                "ولم يُعرض عتاد مخصص للشاطئ. اختيار النوع يدوياً يرفع دقة الحساب."
             )
-            decision = DecisionLevel.NO_GO
-            decision_reason_code = DecisionReasonCode.CRITICAL_DATA_MISSING
-            recommended = []
         fouling_evidence, satellite_proxy_force_majeure = self._fouling_evidence(
             dataset, field_feasibility
         )
@@ -613,10 +648,7 @@ class DecisionEngine:
             decision_reason_code,
         )
         if shore_type_missing:
-            summary = (
-                "لا تذهب: نوع الساحل لم يوثّقه OSM ولم تحدده يدوياً. هذا نقص معلومات، "
-                "وليس حكماً بأن البحر هادئ أو خطر. " + " ".join(decision_context_ar)
-            )
+            summary = f"{summary} " + " ".join(decision_context_ar)
 
         limitations = [
             "درجة الفرصة مؤشر مقارن من صفر إلى مائة وليست احتمالاً إحصائياً لصيد سمكة.",
@@ -626,7 +658,7 @@ class DecisionEngine:
             "بروكسي النقل وحده تنبيه لا يمنع؛ الاستثناء الاحترازي هو CHL كثيف حديث (≤48 ساعة) مع نقل مرتفع، ويظل خطراً غير مؤكد ميدانياً.",
             "حدود السلامة سياسة محافظة قابلة للمعايرة وليست بديلاً عن نشرات الحماية المدنية والحرس البحري أو تقديرك الميداني.",
             "البلاغات الميدانية ورمية الاختبار وإشارات التحذير التي يدخلها المستخدم لا تدخل في هذا القرار.",
-            "مدة التحليل ثابتة 24 ساعة. عند غياب نوع ساحل من OSM واختيار المستخدم، يُعرض تحليل الطقس لكن يبقى القرار NO_GO؛ وتُستخدم أكثر عتبة موج محافظة دون تخمين النوع. اختيار المستخدم يُوسم منفصلاً ولا يُعرض كرصد OSM.",
+            "مدة التحليل ثابتة 24 ساعة. عند غياب نوع ساحل من OSM واختيار المستخدم، يُحسب القرار بأشد عتبة موج محافظة دون تخمين النوع، ويظهر تحذير نوع الساحل؛ اختيار المستخدم يُوسم منفصلاً ولا يُعرض كرصد OSM.",
             "كل القيم الجوية والبحرية الساعية القادمة من Open-Meteo توقعات نموذجية؛ رصد METAR منفصل وفي محطة مطار لا داخل البقعة.",
             "تفضيلات الأنواع أوزان أولية منخفضة التأثير، وتحتاج إلى معايرة بسجل مصيد تونسي محلي.",
             "دُققت 63 عاملاً من المصفوفة، لكن التسجيل لا يعني التنقيط: غير المتاح يبقى Unknown وغير المدعوم مستبعد.",
@@ -652,6 +684,7 @@ class DecisionEngine:
             decision_label_ar=DECISION_LABEL_AR[decision],
             summary_ar=summary,
             decision_context_ar=decision_context_ar,
+            data_gaps_ar=_data_gap_lines(dataset.hours),
             opportunity_score=opportunity,
             confidence=confidence,
             field_feasibility=field_feasibility,

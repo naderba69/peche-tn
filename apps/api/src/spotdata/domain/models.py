@@ -220,6 +220,8 @@ class ForecastHour(StrictModel):
     pressure_msl_hpa: float | None = Field(default=None, ge=850, le=1100)
     visibility_m: float | None = Field(default=None, ge=0)
     cape_jkg: float | None = Field(default=None, ge=0)
+    # Fields in this hour that were filled from the secondary model family (gap-fill only).
+    gap_filled_fields: list[str] = Field(default_factory=list)
 
     @field_validator("time")
     @classmethod
@@ -939,6 +941,7 @@ class DecisionResponse(StrictModel):
     decision_label_ar: str
     summary_ar: str
     decision_context_ar: list[str] = Field(default_factory=list)
+    data_gaps_ar: list[str] = Field(default_factory=list)
     opportunity_score: int = Field(ge=0, le=100)
     score_is_success_probability: Literal[False] = False
     confidence: ConfidenceResult

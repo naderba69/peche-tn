@@ -118,11 +118,12 @@ export function buildTripBlockers(result: DecisionResponse): TripBlockerRow[] {
       : "";
   }
 
-  const dataBlocks = [
-    "critical_data_missing",
-    "stale_forecast_data",
-    "forecast_horizon_exceeded",
-  ].includes(result.decision_reason_code);
+  // Forecast-quality blocks only: stale cache or horizon. A missing shore type is shown in
+  // its own row below, and must not be reported as forecast quality.
+  const dataBlocks = ["stale_forecast_data", "forecast_horizon_exceeded"].includes(
+    result.decision_reason_code,
+  );
+  const shoreMissing = result.spot_profile?.shore_type == null;
 
   const longshore = field.holding_breakdown?.longshore_current ?? "unknown";
 
@@ -183,7 +184,19 @@ export function buildTripBlockers(result: DecisionResponse): TripBlockerRow[] {
       blocksGo: dataBlocks || Boolean(result.cache_fallback_used),
       detail: result.cache_fallback_used
         ? "توقع قديم من الكاش — لا يُعتمد للتخطيط."
-        : `اكتمال ${result.confidence.score}/100 (ليست دقة ميدانية).`,
+        : `اكتمال ${result.confidence.score}/100 (ليست دقة ميدانية).${
+            (result.data_gaps_ar?.length ?? 0) > 0 ? ` ${result.data_gaps_ar?.length} حقل ناقص أو مُلأ من نموذج ثانٍ.` : ""
+          }`,
+    },
+    {
+      id: "shore",
+      group: "سلامة",
+      label: "نوع الشاطئ",
+      tone: shoreMissing ? "caution" : "clear",
+      blocksGo: false,
+      detail: shoreMissing
+        ? "غير موثّق في OSM ولم يُختر يدوياً. يُحسب القرار بأشد عتبة موج محافظة ولا يُعرض عتاد خاص بالشاطئ. اختره يدوياً لدقة أعلى."
+        : `نوع الشاطئ: ${result.spot_profile?.shore_type}.`,
     },
     {
       id: "holding",

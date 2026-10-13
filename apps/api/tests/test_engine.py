@@ -24,16 +24,15 @@ from spotdata.domain.models import (
 engine = DecisionEngine()
 
 
-def test_unknown_shore_type_still_analyzes_full_day_but_never_reaches_go(
+def test_unknown_shore_type_is_caution_not_automatic_no_go(
     dataset_factory: Callable[..., ForecastDataset],
 ) -> None:
     unknown_shore = dataset_factory(spot_updates={"shore_type": None})
     result = engine.evaluate(unknown_shore)
-    assert result.decision == DecisionLevel.NO_GO
-    assert result.decision_reason_code == DecisionReasonCode.CRITICAL_DATA_MISSING
+    assert result.decision_reason_code != DecisionReasonCode.CRITICAL_DATA_MISSING
     assert len(result.hourly) == 24
-    assert result.recommended_windows == []
-    assert "نوع الساحل لم يوثّقه OSM" in result.summary_ar
+    assert "نوع الساحل غير موثّق" in result.summary_ar
+    assert result.gear_recommendation is None
 
     unknown_orientation = dataset_factory(spot_updates={"seaward_orientation_deg": None})
     with pytest.raises(InsufficientDataError, match="اتجاه الساحل Unknown"):
@@ -1097,3 +1096,16 @@ def test_east_short_period_chop_raises_holding_unlike_north(
     assert north.field_feasibility.holding_difficulty != PotentialLevel.HIGH
     assert east.field_feasibility.holding_difficulty == PotentialLevel.HIGH
     assert any("قطار أعشاب" in reason for reason in east.hourly[0].field_feasibility.reasons_ar)
+
+
+def test_data_gaps_are_reported_per_field(
+    dataset_factory: Callable[..., ForecastDataset],
+) -> None:
+    complete = engine.evaluate(dataset_factory(spot_updates={"shore_type": "sandy"}))
+    assert complete.data_gaps_ar == []
+
+    gappy = engine.evaluate(
+        dataset_factory(spot_updates={"shore_type": "sandy"}, hour_updates={"wave_period_s": None})
+    )
+    assert any("فارغ في 24 من 24 ساعة" in line for line in gappy.data_gaps_ar)
+    assert all("غير متوفر، وليس صفراً" in line for line in gappy.data_gaps_ar)

@@ -15,6 +15,7 @@ from spotdata import __version__
 from spotdata.api.routes import router
 from spotdata.config import settings
 from spotdata.services.coast_orientation import CoastOrientationClient
+from spotdata.services.copernicus_marine_wave import CopernicusWaveClient
 from spotdata.services.copernicus_water import CopernicusWaterClient
 from spotdata.services.gemini import GeminiClient
 from spotdata.services.open_meteo import OpenMeteoClient
@@ -46,6 +47,11 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
             weather_url=settings.weather_url,
             marine_url=settings.marine_url,
             observation_url=settings.observation_url,
+            secondary_marine_model=settings.secondary_marine_model,
+            secondary_weather_model=settings.secondary_weather_model,
+            copernicus_client=CopernicusWaveClient(
+                settings.copernicus_username, settings.copernicus_password
+            ),
         )
         app.state.coast_orientation = CoastOrientationClient(
             http_client=http_client,

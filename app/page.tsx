@@ -68,7 +68,7 @@ export default function Home() {
         <a className="brand footer-brand" href="#top"><span className="brand-mark"><Waves size={20} /></span><strong>Peche TN</strong></a>
         <p>أداة تونسية مجانية لدعم قرار سيرفكاست أكثر أماناً ووضوحاً.</p>
         <div className="footer-meta">
-          <span>التطبيق 1.16.0 · محرك القرار 1.11.7 · البحر في النموذج تقريبي وقد يختلف على الشاطئ.</span>
+          <span>التطبيق 1.16.0 · محرك القرار يظهر في حالة الخدمة أعلاه · البحر في النموذج تقريبي وقد يختلف على الشاطئ.</span>
           <a href="/api/docs" target="_blank" rel="noreferrer">واجهة المطورين</a>
         </div>
       </footer>

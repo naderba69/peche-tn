@@ -623,6 +623,7 @@ export interface DecisionResponse {
   decision_label_ar: string;
   summary_ar: string;
   decision_context_ar?: string[];
+  data_gaps_ar?: string[];
   opportunity_score: number;
   score_is_success_probability: false;
   confidence: ConfidenceResult;

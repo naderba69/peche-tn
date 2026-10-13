@@ -544,7 +544,7 @@ export function Planner({ value, loading, error, hasResult, isDirty, onChange, o
         <div className="field-message warning" role="status" data-testid="shore-type-caution">
           <Info size={16} />
           <span>
-            نوع الساحل غير محدد. اختره يدوياً إذا كنت تعرفه؛ وإلا سيبقى القرار النهائي «لا تذهب» بسبب هذه المعلومة الناقصة.
+            نوع الساحل غير محدد. يُحسب القرار بأشد عتبة موج محافظة ويظهر تحذير؛ اختره يدوياً إذا كنت تعرفه لدقة أعلى.
           </span>
         </div>
       )}

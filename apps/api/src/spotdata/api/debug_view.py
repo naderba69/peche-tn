@@ -104,3 +104,33 @@ pre{{white-space:pre-wrap;word-break:break-word;font-size:11px;direction:ltr}}
 <p style="color:#a00"><b>وضع تطوير فقط — يُحذف قبل الإنتاج</b></p>
 {body}
 </body></html>"""
+
+
+@router.get("/dataset", include_in_schema=False)
+async def debug_dataset(
+    request: Request,
+    lat: float = Query(36.399),
+    lon: float = Query(10.578),
+    date: str | None = Query(None),
+    shore: str = Query("sandy"),
+) -> dict[str, object]:
+    """DEV ONLY: return the raw forecast INPUT (dataset) so it can be replayed offline."""
+    from spotdata.domain.enums import OrientationSource
+
+    target = datetime.fromisoformat(date).date() if date else datetime.now(TUNIS).date()
+    auto = await request.app.state.coast_orientation.resolve(lat, lon)
+    spot = SpotProfile(
+        seaward_orientation_deg=auto.orientation_deg,
+        orientation_source=OrientationSource.OVERPASS,
+        orientation_evidence=auto.evidence,
+        shore_type=shore,
+        shore_type_source="user",
+    )
+    payload = ForecastDecisionRequest(
+        location=Coordinates(latitude=lat, longitude=lon),
+        target_date=target,
+        spot=spot,
+    )
+    dataset = await request.app.state.open_meteo.forecast_dataset(payload)
+    result: dict[str, object] = dataset.model_dump(mode="json")
+    return result

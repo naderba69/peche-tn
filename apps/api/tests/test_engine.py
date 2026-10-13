@@ -1172,3 +1172,18 @@ def test_rip_setup_advisory_is_info_only_and_does_not_change_decision(
     if base.hourly[0].field_feasibility.rip_current_potential != PotentialLevel.HIGH:
         assert advisory
         assert advisory[0].severity.value == "info"
+
+
+def test_user_bottom_type_adds_info_only_advisory(
+    dataset_factory: Callable[..., ForecastDataset],
+) -> None:
+    rock = engine.evaluate(
+        dataset_factory(
+            spot_updates={"bottom_type": "rock", "bottom_type_source": "user"}, count=48
+        )
+    )
+    plain = engine.evaluate(dataset_factory(count=48))
+    rock_factor = [f for f in rock.hourly[0].factors if f.code == "bottom_rock_snag_advisory"]
+    assert rock_factor and rock_factor[0].severity.value == "info"
+    assert rock.decision == plain.decision
+    assert not any(f.code == "bottom_rock_snag_advisory" for f in plain.hourly[0].factors)

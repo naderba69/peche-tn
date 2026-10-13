@@ -6,6 +6,7 @@ from itertools import pairwise
 from zoneinfo import ZoneInfo
 
 from .enums import (
+    BottomType,
     CatalogStatus,
     ConfidenceBand,
     DecisionLevel,
@@ -2001,6 +2002,34 @@ class DecisionEngine:
                     RiskSeverity.INFO,
                     f"{hour.wave_height_m:.2f} م / {hour.wave_period_s:.0f} ث",
                     "قد يرفع هذا احتمال التيار الساحب في شواطئ معينة؛ العتبة غير معايَرة لهذا الشاطئ، ولا تغيّر القرار.",
+                    basis=FactorBasis.DERIVED_FORECAST,
+                    rule_nature=RuleNature.OPERATIONAL_PROXY,
+                )
+            )
+
+        # INFO-only seabed advisories from the USER-entered bottom type. They never
+        # set caution or change the decision (see docs/FISHING-TRIP-REPORT-AR.md).
+        bottom = dataset.spot.bottom_type
+        if bottom == BottomType.ROCK:
+            factors.append(
+                _risk_factor(
+                    "bottom_rock_snag_advisory",
+                    "إرشاد: قاع صخري",
+                    RiskSeverity.INFO,
+                    "قاع صخري (مُدخل يدوياً)",
+                    "خطر علق الرصاص والخيط في الصخور؛ استعمل رصاصاً يسهل فكه وخيطاً أقوى.",
+                    basis=FactorBasis.DERIVED_FORECAST,
+                    rule_nature=RuleNature.OPERATIONAL_PROXY,
+                )
+            )
+        if bottom == BottomType.POSIDONIA:
+            factors.append(
+                _risk_factor(
+                    "bottom_posidonia_advisory",
+                    "إرشاد: قاع posidonia",
+                    RiskSeverity.INFO,
+                    "posidonia (مُدخل يدوياً)",
+                    "أعشاب وحطام قد تعلق بالطعم والخيط؛ الحطام يزيد بعد العواصف، وليس في ذروتها.",
                     basis=FactorBasis.DERIVED_FORECAST,
                     rule_nature=RuleNature.OPERATIONAL_PROXY,
                 )

@@ -63,7 +63,7 @@ class CopernicusWaveClient:
     def _fetch_sync(
         self, latitude: float, longitude: float, start: date, end: date
     ) -> dict[str, Any] | None:
-        import copernicusmarine  # type: ignore[import-untyped,import-not-found]  # optional extra
+        copernicusmarine = importlib.import_module("copernicusmarine")  # optional extra
 
         dataset = copernicusmarine.open_dataset(
             dataset_id=DATASET_ID,

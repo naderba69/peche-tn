@@ -24,16 +24,15 @@ from spotdata.domain.models import (
 engine = DecisionEngine()
 
 
-def test_unknown_shore_type_still_analyzes_full_day_but_never_reaches_go(
+def test_unknown_shore_type_is_caution_not_automatic_no_go(
     dataset_factory: Callable[..., ForecastDataset],
 ) -> None:
     unknown_shore = dataset_factory(spot_updates={"shore_type": None})
     result = engine.evaluate(unknown_shore)
-    assert result.decision == DecisionLevel.NO_GO
-    assert result.decision_reason_code == DecisionReasonCode.CRITICAL_DATA_MISSING
+    assert result.decision_reason_code != DecisionReasonCode.CRITICAL_DATA_MISSING
     assert len(result.hourly) == 24
-    assert result.recommended_windows == []
-    assert "نوع الساحل لم يوثّقه OSM" in result.summary_ar
+    assert "نوع الساحل غير موثّق" in result.summary_ar
+    assert result.gear_recommendation is None
 
     unknown_orientation = dataset_factory(spot_updates={"seaward_orientation_deg": None})
     with pytest.raises(InsufficientDataError, match="اتجاه الساحل Unknown"):

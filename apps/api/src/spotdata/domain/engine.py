@@ -561,19 +561,16 @@ class DecisionEngine:
             field_feasibility,
             confidence,
         )
+        # Missing shore type is a caution, not an automatic NO_GO: the safety gates use the
+        # most conservative wave multiplier (see policy.safety_thresholds), and the gear
+        # recommendation is withheld because it depends on the shore.
         shore_type_missing = dataset.spot.shore_type is None
         decision_context_ar: list[str] = []
         if shore_type_missing:
-            pre_gate_candidate_count = len(recommended)
             decision_context_ar.append(
-                f"قبل تطبيق مانع نوع الساحل، ظهرت {pre_gate_candidate_count} نافذة مرشحة من فحص الطقس والتنفيذ؛ "
-                "هذه ليست توصية خروج ولا GO نهائياً."
-                if pre_gate_candidate_count
-                else "قبل تطبيق مانع نوع الساحل، لم تظهر نافذة ساعات متصلة بلا موانع محسوبة."
+                "نوع الساحل غير موثّق (لا في OSM ولا يدوياً): حُسب القرار بأشد عتبة موج محافظة "
+                "ولم يُعرض عتاد مخصص للشاطئ. اختيار النوع يدوياً يرفع دقة الحساب."
             )
-            decision = DecisionLevel.NO_GO
-            decision_reason_code = DecisionReasonCode.CRITICAL_DATA_MISSING
-            recommended = []
         fouling_evidence, satellite_proxy_force_majeure = self._fouling_evidence(
             dataset, field_feasibility
         )
@@ -613,10 +610,7 @@ class DecisionEngine:
             decision_reason_code,
         )
         if shore_type_missing:
-            summary = (
-                "لا تذهب: نوع الساحل لم يوثّقه OSM ولم تحدده يدوياً. هذا نقص معلومات، "
-                "وليس حكماً بأن البحر هادئ أو خطر. " + " ".join(decision_context_ar)
-            )
+            summary = f"{summary} " + " ".join(decision_context_ar)
 
         limitations = [
             "درجة الفرصة مؤشر مقارن من صفر إلى مائة وليست احتمالاً إحصائياً لصيد سمكة.",
@@ -626,7 +620,7 @@ class DecisionEngine:
             "بروكسي النقل وحده تنبيه لا يمنع؛ الاستثناء الاحترازي هو CHL كثيف حديث (≤48 ساعة) مع نقل مرتفع، ويظل خطراً غير مؤكد ميدانياً.",
             "حدود السلامة سياسة محافظة قابلة للمعايرة وليست بديلاً عن نشرات الحماية المدنية والحرس البحري أو تقديرك الميداني.",
             "البلاغات الميدانية ورمية الاختبار وإشارات التحذير التي يدخلها المستخدم لا تدخل في هذا القرار.",
-            "مدة التحليل ثابتة 24 ساعة. عند غياب نوع ساحل من OSM واختيار المستخدم، يُعرض تحليل الطقس لكن يبقى القرار NO_GO؛ وتُستخدم أكثر عتبة موج محافظة دون تخمين النوع. اختيار المستخدم يُوسم منفصلاً ولا يُعرض كرصد OSM.",
+            "مدة التحليل ثابتة 24 ساعة. عند غياب نوع ساحل من OSM واختيار المستخدم، يُحسب القرار بأشد عتبة موج محافظة دون تخمين النوع، ويظهر تحذير نوع الساحل؛ اختيار المستخدم يُوسم منفصلاً ولا يُعرض كرصد OSM.",
             "كل القيم الجوية والبحرية الساعية القادمة من Open-Meteo توقعات نموذجية؛ رصد METAR منفصل وفي محطة مطار لا داخل البقعة.",
             "تفضيلات الأنواع أوزان أولية منخفضة التأثير، وتحتاج إلى معايرة بسجل مصيد تونسي محلي.",
             "دُققت 63 عاملاً من المصفوفة، لكن التسجيل لا يعني التنقيط: غير المتاح يبقى Unknown وغير المدعوم مستبعد.",

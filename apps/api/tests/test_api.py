@@ -291,12 +291,12 @@ def test_unknown_osm_shore_type_uses_manual_choice_only_when_explicit(
         assert body["decision_context_ar"] == []
         assert "نوع الساحل غير محدد" not in body["summary_ar"]
     else:
-        assert body["decision"] == "no_go"
-        assert body["decision_reason_code"] == "critical_data_missing"
-        assert body["recommended_windows"] == []
-        assert "نوع الساحل لم يوثّقه OSM" in body["summary_ar"]
+        # Missing shore type is a caution: no automatic NO_GO, no shore-specific gear.
+        assert body["decision_reason_code"] != "critical_data_missing"
+        assert "نوع الساحل غير موثّق" in body["summary_ar"]
         assert body["decision_context_ar"]
-        assert "نافذة" in body["decision_context_ar"][0]
+        assert "أشد عتبة موج محافظة" in body["decision_context_ar"][0]
+        assert body["gear_recommendation"] is None
         assert body["spot_profile"]["shore_type"] is None
         assert body["spot_profile"]["shore_type_source"] == "unknown"
     assert any(source["provider"] == "OpenStreetMap Overpass" for source in body["sources"])

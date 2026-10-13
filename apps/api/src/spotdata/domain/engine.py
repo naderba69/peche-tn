@@ -118,7 +118,7 @@ from .species import (
 
 TUNIS_TZ = ZoneInfo("Africa/Tunis")
 
-ENGINE_VERSION = "1.11.7"
+ENGINE_VERSION = "1.12.0"
 
 # --------------------------------------------------------------------------- #
 # Trip-ruining factor thresholds (v1.9.8, evidence-gated; see SOURCES-AUDIT §3.6)
@@ -169,6 +169,44 @@ def _required_seaward_orientation(dataset: ForecastDataset) -> float:
     if orientation is None:
         raise InsufficientDataError("اتجاه الساحل Unknown؛ لا يمكن حساب التعرض دون مصدر موثق.")
     return orientation
+
+
+# Fields reported to the user when empty in part of the decision day.
+_GAP_REPORT_FIELDS: tuple[str, ...] = (
+    "wind_speed_kmh",
+    "wind_gust_kmh",
+    "wind_direction_deg",
+    "wave_height_m",
+    "wave_period_s",
+    "wave_direction_deg",
+    "swell_height_m",
+    "ocean_current_velocity_kmh",
+    "sea_level_height_msl_m",
+    "visibility_m",
+    "weather_code",
+    "pressure_msl_hpa",
+)
+
+
+def _data_gap_lines(hours: list[ForecastHour]) -> list[str]:
+    """Explain, per field, how many hours are empty or were gap-filled from a second model."""
+    total = len(hours)
+    if total == 0:
+        return []
+    lines: list[str] = []
+    for name in _GAP_REPORT_FIELDS:
+        missing = sum(1 for hour in hours if getattr(hour, name) is None)
+        filled = sum(1 for hour in hours if name in hour.gap_filled_fields)
+        if not missing and not filled:
+            continue
+        label = _FIELD_LABELS_AR.get(name, name)
+        parts: list[str] = []
+        if missing:
+            parts.append(f"فارغ في {missing} من {total} ساعة (غير متوفر، وليس صفراً)")
+        if filled:
+            parts.append(f"مُلئ من نموذج ثانٍ في {filled} ساعة")
+        lines.append(f"{label}: " + "؛ ".join(parts))
+    return lines
 
 
 _FIELD_LABELS_AR: dict[str, str] = {
@@ -646,6 +684,7 @@ class DecisionEngine:
             decision_label_ar=DECISION_LABEL_AR[decision],
             summary_ar=summary,
             decision_context_ar=decision_context_ar,
+            data_gaps_ar=_data_gap_lines(dataset.hours),
             opportunity_score=opportunity,
             confidence=confidence,
             field_feasibility=field_feasibility,

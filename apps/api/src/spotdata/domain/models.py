@@ -941,6 +941,7 @@ class DecisionResponse(StrictModel):
     decision_label_ar: str
     summary_ar: str
     decision_context_ar: list[str] = Field(default_factory=list)
+    data_gaps_ar: list[str] = Field(default_factory=list)
     opportunity_score: int = Field(ge=0, le=100)
     score_is_success_probability: Literal[False] = False
     confidence: ConfidenceResult

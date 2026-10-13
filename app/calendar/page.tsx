@@ -125,7 +125,7 @@ export default function CalendarPage() {
         <Link className="brand footer-brand" href="/"><span className="brand-mark"><Waves size={20} /></span><strong>Peche TN</strong></Link>
         <p>أداة تونسية مجانية لدعم قرار سيرفكاست أكثر أماناً ووضوحاً.</p>
         <div className="footer-meta">
-          <span>التطبيق 1.16.0 · محرك القرار 1.11.7</span>
+          <span>التطبيق 1.16.0</span>
           <Link href="/">الرئيسية</Link>
         </div>
       </footer>

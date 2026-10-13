@@ -461,6 +461,7 @@ function buildReportText(
     ...(lead ? [`• ساعات بلا موانع: ${formatWindowRange(lead.start, lead.end)}.`] : []),
     ...(windowCautions.length ? [`• حذر داخل الساعات المفتوحة: ${windowCautions.join(" · ")}.`] : []),
     `• دعم بيانات التوقع: ${result.confidence.score}/100 — مؤشر اكتمال/اتساق/أفق، لا احتمال دقة أو سلامة.`,
+    ...(result.data_gaps_ar ?? []).map((item) => `• فجوة بيانات: ${item}`),
     `• قابلية التنفيذ وفق النموذج: ${fieldFeasibilityLabels[result.field_feasibility.status]}; دعم الأدلة ${result.field_feasibility.confidence}/100 (سقفه 50 دون رصد محلي؛ ليس احتمال سلامة).`,
     `• مؤشرات النقل النموذجية: صعوبة تثبيت الخط ${potentialLabels[result.field_feasibility.holding_difficulty]} · نقل الصوفة/الحطام ${potentialLabels[result.field_feasibility.fouling_transport_potential]} · ظروف التعكير ${potentialLabels[result.field_feasibility.turbidity_potential]} · تيار ساحبي ${potentialLabels[result.field_feasibility.rip_current_potential]}. هذه تقديرات نموذجية وليست مشاهدات.`,
     ...(guidance.length ? ["", "ما يلزم ميدانياً", ...guidance.slice(0, 4).map((item) => `• ${item}`)] : []),
@@ -1084,6 +1085,9 @@ export function SpotReport({ result, request, stale = false, onClose }: SpotRepo
         <div className="report-section-title"><span>9</span><div><h3 id="report-sources-title">المصادر وحدود المطابقة</h3><p>باش تعرف منين جاء الرقم وشنوّة ما ينجمش يشوف.</p></div></div>
         {result.sources.length ? <div className="report-source-list">{result.sources.map((source) => <article key={`${source.provider}-${source.product}`}><Database size={17} /><span><strong>{source.provider} · {source.product}</strong><small>{source.data_kind === "direct_observation" ? "رصد نقطي في محطة، وليس داخل البقعة" : source.data_kind === "remote_sensing_estimate" ? `استعادة أقمار صناعية سياقية · دقة ${source.horizontal_resolution_km ?? "Unknown"} كم` : source.horizontal_resolution_km ? `توقع بدقة أفقية تقريبية ${source.horizontal_resolution_km} كم` : "توقع حسب النموذج المتاح"} · جُلب {formatHour(source.retrieved_at)}</small></span></article>)}</div> : <p className="report-empty">مصدر البيانات غير متوفر في الاستجابة.</p>}
         <div className="report-confidence-reasons"><strong>كيف حُسب دعم بيانات التوقع ({result.confidence.score}/100)؟</strong><ul>{result.confidence.reasons_ar.map((reason) => <li key={reason}>{reason}</li>)}</ul></div>
+        {result.data_gaps_ar?.length ? (
+          <div className="report-confidence-reasons"><strong>فجوات البيانات في يوم التحليل</strong><ul>{result.data_gaps_ar.map((gap) => <li key={gap}>{gap}</li>)}</ul></div>
+        ) : null}
         <div className="report-confidence-reasons"><strong>حدود مؤشر تنفيذ منخفض المعايرة</strong><ul>{result.field_feasibility.limitations_ar.map((limitation) => <li key={limitation}>{limitation}</li>)}</ul></div>
         <div className="report-limitations"><strong>حدود يجب تبقى ظاهرة</strong><ul>{result.limitations_ar.map((limitation) => <li key={limitation}>{limitation}</li>)}</ul></div>
       </section>

@@ -55,6 +55,13 @@ export function buildPrimaryReason(result: DecisionResponse): string {
         "مؤشر نشاط السمك لا يقرر السماح بالذهاب.",
       ].filter(Boolean).join(" ");
     }
+    case "caution_only_windows": {
+      const cautious = result.recommended_windows.find((w) => w.safety === "caution") ?? result.recommended_windows[0];
+      if (!cautious) {
+        return "لا توجد ساعات مفتوحة بتحذير في هذا الحكم.";
+      }
+      return `حذر: ساعات ${formatWindowRange(cautious.start, cautious.end)} مفتوحة بتحذيرات احترازية، ولا توجد ساعة اجتازت الحدود بلا تحذير. هذا ليس اذهب نظيفاً.`;
+    }
     case "safety_hazard":
       return "خطر سلامة في الساعات المتاحة؛ لا توجد ساعات كافية بلا مانع محسوب.";
     case "field_infeasible":
@@ -153,7 +160,11 @@ export function buildFishermanNarrative(
   const paragraphs: string[] = [];
 
   // 1) الحكم
-  if (result.decision === "go" && lead) {
+  if (result.decision === "caution" && lead) {
+    paragraphs.push(
+      `حذر: ساعات ${formatWindowRange(lead.start, lead.end)} مفتوحة بتحذيرات محددة وليست نظيفة. راقب البحر قبل الخروج. التنفيذ ${fieldFeasibilityLabels[result.field_feasibility.status]}.`
+    );
+  } else if (result.decision === "go" && lead) {
     paragraphs.push(
       `نزيدو في الساعات بلا موانع ${formatWindowRange(lead.start, lead.end)} فقط. خارجها لا تخرج. التنفيذ ${fieldFeasibilityLabels[result.field_feasibility.status]}. العين على البحر قبل العتاد.`,
     );
@@ -251,6 +262,8 @@ export function buildFishermanNarrative(
   // 7) الخلاصة
   if (result.decision === "go") {
     paragraphs.push("الخلاصة: اخرج فقط في الساعات بلا موانع. إن تغيّر البحر على الأرض، أعد المعاينة.");
+  } else if (result.decision === "caution") {
+    paragraphs.push("الخلاصة: حذر. اخرج فقط في الساعات المعروضة مع مراعاة التحذيرات المذكورة، وأعد المعاينة إن تغيّر البحر.");
   } else {
     paragraphs.push("الخلاصة: لا تذهب. لا عتاد ولا نوع سمك يفتح ساعات فيها مانع محسوب.");
   }

@@ -21,6 +21,7 @@ from spotdata.services.cache import AsyncTTLCache
 
 LOGGER = logging.getLogger(__name__)
 EARTH_RADIUS_M = 6_371_008.8
+ORIENTATION_SEARCH_BUDGET_S = 8
 SEARCH_RADII_M = (3_000, 5_000, 10_000)
 MAX_SHORE_FEATURE_DISTANCE_M = 100.0
 
@@ -365,6 +366,27 @@ def calculate_orientation(
     )
 
 
+_CONFIDENCE_RANK = {"high": 2, "medium": 1, "low": 0}
+
+
+def _meets_verified_rules(result: AutoOrientationResponse) -> bool:
+    """Same rules the frontend and backend use to accept an orientation (unchanged)."""
+    evidence = result.evidence
+    return (
+        evidence is not None
+        and evidence.confidence == "high"
+        and evidence.coastline_distance_m <= 500
+        and evidence.segments_used >= 3
+    )
+
+
+def _orientation_rank(result: AutoOrientationResponse) -> tuple[int, float]:
+    evidence = result.evidence
+    if evidence is None:
+        return (-1, 0.0)
+    return (_CONFIDENCE_RANK.get(evidence.confidence, -1), -evidence.coastline_distance_m)
+
+
 class CoastOrientationClient:
     def __init__(
         self,
@@ -378,6 +400,60 @@ class CoastOrientationClient:
             ttl_seconds=24 * 60 * 60,
             max_entries=256,
         )
+        self.segment_cache: AsyncTTLCache[
+            tuple[float, float, int],
+            tuple[tuple[tuple[float, float], tuple[float, float]], ...] | None,
+        ] = AsyncTTLCache(ttl_seconds=24 * 60 * 60, max_entries=64)
+
+    async def coastline_segments(
+        self, latitude: float, longitude: float, radius_m: int
+    ) -> tuple[tuple[tuple[float, float], tuple[float, float]], ...] | None:
+        """Wide coastline geometry for fetch exposure. None when unavailable."""
+        key = (round(latitude, 4), round(longitude, 4), radius_m)
+        cached = await self.segment_cache.get_or_create(
+            key, lambda: self._coastline_uncached(latitude, longitude, radius_m)
+        )
+        if cached is None:
+            await self.segment_cache.delete(key)
+        return cached
+
+    async def _coastline_uncached(
+        self, latitude: float, longitude: float, radius_m: int
+    ) -> tuple[tuple[tuple[float, float], tuple[float, float]], ...] | None:
+        query = (
+            "[out:json][timeout:20];"
+            f'way(around:{radius_m},{latitude},{longitude})["natural"="coastline"];'
+            "out geom;"
+        )
+        for server in self._servers:
+            try:
+                async with asyncio.timeout(25):
+                    response = await self._http_client.get(
+                        server,
+                        params={"data": query},
+                        timeout=20.0,
+                        headers={"Accept": "application/json"},
+                    )
+                response.raise_for_status()
+                payload: Any = response.json()
+                elements = payload.get("elements") if isinstance(payload, dict) else None
+                if not isinstance(elements, list):
+                    continue
+                segments: list[tuple[tuple[float, float], tuple[float, float]]] = []
+                for element in elements:
+                    geometry = _valid_geometry(element)
+                    segments.extend(
+                        (start, end) for start, end in pairwise(geometry) if start != end
+                    )
+                if segments:
+                    return tuple(segments)
+            except (httpx.HTTPError, ValueError, TypeError, TimeoutError) as exc:
+                LOGGER.warning(
+                    "Overpass coastline fetch failed server=%s type=%s",
+                    server,
+                    type(exc).__name__,
+                )
+        return None
 
     async def resolve(self, latitude: float, longitude: float) -> AutoOrientationResponse:
         key = (round(latitude, 5), round(longitude, 5))
@@ -392,8 +468,11 @@ class CoastOrientationClient:
 
     async def _resolve_uncached(self, latitude: float, longitude: float) -> AutoOrientationResponse:
         failures: list[str] = []
+        best: AutoOrientationResponse | None = None
         try:
-            async with asyncio.timeout(25):
+            # Bounded search budget: the UI waits for this result before the planner can
+            # render an actionable state. On expiry we return the strongest result seen.
+            async with asyncio.timeout(ORIENTATION_SEARCH_BUDGET_S):
                 for radius in SEARCH_RADII_M:
                     query = (
                         "[out:json][timeout:12];("
@@ -427,8 +506,18 @@ class CoastOrientationClient:
                                 server=server,
                             )
                             if result.status == "resolved":
-                                return result
-                            failures.extend(result.reasons_ar)
+                                # Keep searching: a mirror or radius can return a
+                                # weaker geometry for the same point. Return the first
+                                # result that meets the verification rules; otherwise
+                                # the strongest one seen (never a silent first-answer).
+                                if _meets_verified_rules(result):
+                                    return result
+                                if best is None or _orientation_rank(result) > _orientation_rank(
+                                    best
+                                ):
+                                    best = result
+                            else:
+                                failures.extend(result.reasons_ar)
                         except (httpx.HTTPError, ValueError, TypeError) as exc:
                             LOGGER.warning(
                                 "Overpass orientation failed server=%s radius=%s type=%s",
@@ -438,7 +527,10 @@ class CoastOrientationClient:
                             )
                             failures.append(f"{server}: تعذر الاتصال أو تحليل الاستجابة")
         except TimeoutError:
-            failures.append("انتهت مهلة Overpass الكلية بعد 25 ثانية")
+            failures.append(f"انتهت مهلة Overpass الكلية بعد {ORIENTATION_SEARCH_BUDGET_S} ثوانٍ")
+
+        if best is not None:
+            return best
 
         return AutoOrientationResponse(
             status="unavailable",

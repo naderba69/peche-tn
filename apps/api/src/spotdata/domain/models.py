@@ -938,6 +938,28 @@ class DecisionPreflightNoGo(StrictModel):
         return value
 
 
+class WaveFetchSample(StrictModel):
+    time: datetime
+    wave_from_deg: float = Field(ge=0, le=360)
+    fetch_km: float | None = Field(default=None, ge=0)
+    hit_coastline: bool | None = None
+    in_seaward_sector: bool
+
+
+class WaveFetchDiagnostic(StrictModel):
+    """Diagnostic only: open-water distance toward the forecast wave source.
+
+    It never changes the decision, confidence or windows. Fetch values are geometry
+    from OSM coastline and are not a wave measurement.
+    """
+
+    status: Literal["resolved", "unavailable"]
+    seaward_orientation_deg: float | None = Field(default=None, ge=0, lt=360)
+    search_radius_km: float = Field(ge=0)
+    samples: list[WaveFetchSample] = Field(default_factory=list)
+    reasons_ar: list[str] = Field(default_factory=list)
+
+
 class DecisionResponse(StrictModel):
     schema_version: Literal["3.20"] = SCHEMA_VERSION
     engine_version: str
@@ -975,6 +997,7 @@ class DecisionResponse(StrictModel):
     cache_fallback_age_seconds: float | None = Field(default=None, ge=0)
     spot_profile: SpotProfile | None = None
     automated_shore_profile: AutomatedShoreProfile | None = None
+    wave_fetch_diagnostic: WaveFetchDiagnostic | None = None
     observation_comparison: ObservationComparison
     factor_coverage: FactorCoverageSummary
     factor_assessments: list[FactorAssessment]
@@ -991,8 +1014,13 @@ class DecisionResponse(StrictModel):
 
     @model_validator(mode="after")
     def headline_decision_is_binary_and_ledger_is_complete(self) -> DecisionResponse:
-        if self.decision not in {DecisionLevel.GO, DecisionLevel.NO_GO}:
-            raise ValueError("headline decision must be binary")
+        if self.decision not in {DecisionLevel.GO, DecisionLevel.CAUTION, DecisionLevel.NO_GO}:
+            raise ValueError("headline decision must be GO, CAUTION or NO_GO")
+        if self.decision == DecisionLevel.CAUTION and (
+            self.decision_reason_code != DecisionReasonCode.CAUTION_ONLY_WINDOWS
+            or not self.recommended_windows
+        ):
+            raise ValueError("CAUTION requires CAUTION_ONLY_WINDOWS and at least one window")
         if (
             self.decision == DecisionLevel.GO
             and self.decision_reason_code != DecisionReasonCode.SAFE_WINDOW
@@ -1007,9 +1035,13 @@ class DecisionResponse(StrictModel):
             raise ValueError("GO requires at least one recommended gate-passing window")
         if self.decision == DecisionLevel.NO_GO and self.recommended_windows:
             raise ValueError("NO_GO cannot expose a recommended window")
-        expected_label = "اذهب" if self.decision == DecisionLevel.GO else "لا تذهب"
+        expected_label = {
+            DecisionLevel.GO: "اذهب",
+            DecisionLevel.CAUTION: "حذر",
+            DecisionLevel.NO_GO: "لا تذهب",
+        }[self.decision]
         if self.decision_label_ar != expected_label:
-            raise ValueError("headline decision label must be the exact binary Arabic label")
+            raise ValueError("headline decision label must be the exact Arabic label")
         if len(self.factor_assessments) != 63:
             raise ValueError("factor assessment ledger must contain all 63 matrix factors")
         if len({item.matrix_id for item in self.factor_assessments}) != 63:

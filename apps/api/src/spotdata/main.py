@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import logging
-import os
 import time
 import uuid
 from collections.abc import AsyncIterator
@@ -120,9 +119,3 @@ async def unhandled_error(request: Request, exc: Exception) -> JSONResponse:
 
 
 app.include_router(router, prefix="/api")
-
-# DEV ONLY: remove this block (and api/debug_view.py) before production.
-if os.getenv("SPOTDATA_DEV_DEBUG") == "1":
-    from spotdata.api.debug_view import router as debug_router
-
-    app.include_router(debug_router)

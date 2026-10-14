@@ -2805,7 +2805,13 @@ class DecisionEngine:
                     runs.append(current)
                 current = []
                 continue
-            if current and item.time - current[-1].time > timedelta(hours=1, minutes=5):
+            # A run must share one safety level. Otherwise a single CAUTION hour is
+            # merged into a GO run and the whole run is labelled CAUTION, which
+            # turns 14 clean GO hours into "no GO window" (the one-hour-spoils-day bug).
+            if current and (
+                item.time - current[-1].time > timedelta(hours=1, minutes=5)
+                or item.safety != current[-1].safety
+            ):
                 if len(current) >= MIN_OPEN_WINDOW_HOURS:
                     runs.append(current)
                 current = []
@@ -2949,6 +2955,16 @@ class DecisionEngine:
         # The product has one binary headline. A caution-only set of windows is not
         # enough to issue GO: at least one available window must pass the safety gate.
         if not any(window.safety == DecisionLevel.GO for window in recommended):
+            # Caution-only windows: no hard blocker exists (those never become windows),
+            # so the day is shown as CAUTION with the explicit warnings, not as a silent
+            # NO_GO. Data-confidence and unknown-field gates still stop the day.
+            if (
+                any(window.safety == DecisionLevel.CAUTION for window in recommended)
+                and recommended[0].safety != DecisionLevel.NO_GO
+                and field_feasibility.status != FieldFeasibilityLevel.UNKNOWN
+                and confidence.score >= 50
+            ):
+                return DecisionLevel.CAUTION, DecisionReasonCode.CAUTION_ONLY_WINDOWS
             return DecisionLevel.NO_GO, DecisionReasonCode.CONSERVATIVE_UNCERTAINTY
 
         best = recommended[0]
@@ -4714,11 +4730,27 @@ class DecisionEngine:
                 f"دعم البيانات {confidence}/100.{opportunity_note}{proxy_note}"
             )
 
+        if decision == DecisionLevel.CAUTION and recommended:
+            # Caution-only day: not a NO_GO. Explain the warnings instead of hiding them.
+            cautious = next(
+                (w for w in recommended if w.safety == DecisionLevel.CAUTION),
+                recommended[0],
+            )
+            warnings = _unique(cautious.key_factors_ar)[:3]
+            warning_text = "، ".join(warnings) if warnings else "موانع احترازية مؤقتة غير مؤكدة"
+            return (
+                f"التوصية: حذر. لا توجد ساعة اجتازت الحدود بلا تحذير، لكن الساعات من "
+                f"{_time_range_ar(cautious.start, cautious.end)} مفتوحة بتحذير: {warning_text}. "
+                "راقب الرياح والأمواج قبل الخروج، والقرار ليس شهادة سلامة ميدانية. "
+                f"دعم البيانات {confidence}/100."
+            )
+
         reason_labels = {
             DecisionReasonCode.SAFETY_HAZARD: "خطر سلامة أو تجاوز محافظ داخل النافذة",
             DecisionReasonCode.FIELD_INFEASIBLE: "جرّ أو عكارة مرتفعان: لا ساعات كافية بلا مانع تنفيذ",
             DecisionReasonCode.CRITICAL_DATA_MISSING: "نقص بيانات حرجة للسلامة أو قابلية التنفيذ",
             DecisionReasonCode.CONSERVATIVE_UNCERTAINTY: "لا توجد نافذة اجتازت بوابة السلامة، أو أن اكتمال البيانات/الثقة لا يكفي لقرار إيجابي",
+            DecisionReasonCode.CAUTION_ONLY_WINDOWS: "ساعات مفتوحة بتحذير احترازي فقط؛ لا توجد ساعة بلا تحذير",
             DecisionReasonCode.SAFE_WINDOW: "نافذة اجتازت الحدود الآلية وقابلة للتنفيذ مبدئياً",
             DecisionReasonCode.FOULING_CONFIRMED: "رمز قديم غير مستخدم؛ الإفادات الميدانية والرمية اليدوية لا تدخل في القرار الحالي",
             DecisionReasonCode.FOULING_PROXY_RISK: "إشارة CHL حديثة مع نقل نموذجي مرتفع؛ خطر صوفة محتمل غير مؤكد ميدانياً",
@@ -5301,6 +5333,7 @@ def _force_majeure_for(reason_code: DecisionReasonCode) -> ForceMajeureKind:
     """Map the reason code to the single hard blocker behind the decision."""
     return {
         DecisionReasonCode.SAFE_WINDOW: ForceMajeureKind.NONE,
+        DecisionReasonCode.CAUTION_ONLY_WINDOWS: ForceMajeureKind.NONE,
         DecisionReasonCode.SAFETY_HAZARD: ForceMajeureKind.SAFETY,
         DecisionReasonCode.FIELD_INFEASIBLE: ForceMajeureKind.HOLDING,
         DecisionReasonCode.CRITICAL_DATA_MISSING: ForceMajeureKind.DATA,

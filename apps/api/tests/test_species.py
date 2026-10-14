@@ -297,8 +297,8 @@ def test_sea_state_fit_tracks_wave_and_wind(
         hour_updates={"wave_height_m": 1.4, "wind_speed_kmh": 30.0},
     )
     rough_result = engine.evaluate(rough)
-    assert rough_result.decision == DecisionLevel.NO_GO
-    assert rough_result.decision_reason_code == DecisionReasonCode.CONSERVATIVE_UNCERTAINTY
+    assert rough_result.decision == DecisionLevel.CAUTION
+    assert rough_result.decision_reason_code == DecisionReasonCode.CAUTION_ONLY_WINDOWS
     rough_by_species = {m.species: m for m in rough_result.species_axes.species_matches}
     assert rough_by_species["european_seabass"].sea_state_fit == "neutral"
     assert rough_by_species["white_seabream"].sea_state_fit == "neutral"

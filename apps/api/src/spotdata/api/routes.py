@@ -40,9 +40,11 @@ from spotdata.domain.models import (
     SourceMetadata,
     SpotCandidate,
     SpotProfile,
+    WaveFetchDiagnostic,
 )
 from spotdata.services.coast_orientation import CoastOrientationClient
 from spotdata.services.copernicus_water import CopernicusWaterClient, unavailable_water_context
+from spotdata.services.fetch_exposure import build_wave_fetch_diagnostic
 from spotdata.services.gemini import GeminiClient, GeminiServiceError
 from spotdata.services.open_meteo import OpenMeteoClient, UpstreamDataError
 
@@ -302,6 +304,48 @@ async def generate_gemini_report(
         ) from exc
 
 
+FETCH_SEARCH_RADIUS_M = 30_000
+
+
+FETCH_DIAGNOSTIC_TIMEOUT_SECONDS = 8.0
+
+
+async def _coastline_for_diagnostic(
+    coast_client: CoastOrientationClient, payload: ForecastDecisionRequest
+) -> tuple[tuple[tuple[float, float], tuple[float, float]], ...] | None:
+    """Bounded, optional geometry lookup. Runs in parallel with the forecast."""
+    try:
+        return await asyncio.wait_for(
+            coast_client.coastline_segments(
+                payload.location.latitude,
+                payload.location.longitude,
+                FETCH_SEARCH_RADIUS_M,
+            ),
+            timeout=FETCH_DIAGNOSTIC_TIMEOUT_SECONDS,
+        )
+    except Exception as exc:  # diagnostic only: never delay or break the decision
+        LOGGER.warning("wave fetch diagnostic geometry skipped: %s", type(exc).__name__)
+        return None
+
+
+def _wave_fetch_diagnostic(
+    payload: ForecastDecisionRequest,
+    decision: DecisionResponse,
+    segments: tuple[tuple[tuple[float, float], tuple[float, float]], ...] | None,
+) -> WaveFetchDiagnostic:
+    """Diagnostic attached after the decision. Failure here never affects the decision."""
+    return build_wave_fetch_diagnostic(
+        latitude=payload.location.latitude,
+        longitude=payload.location.longitude,
+        seaward_deg=payload.spot.seaward_orientation_deg,
+        segments=segments,
+        search_radius_m=FETCH_SEARCH_RADIUS_M,
+        hourly_wave_from=[
+            (hour.time, hour.forecast.wave_direction_deg) for hour in decision.hourly
+        ],
+    )
+
+
 @router.post(
     "/v1/decisions/forecast",
     response_model=DecisionResponse | DecisionPreflightNoGo,
@@ -374,10 +418,15 @@ async def forecast_decision(
             )
 
     try:
-        dataset, water_context = await asyncio.gather(
-            client.forecast_dataset(verified_payload),
-            optional_water_context(),
-        )
+        fetch_task = asyncio.create_task(_coastline_for_diagnostic(coast_client, verified_payload))
+        try:
+            dataset, water_context = await asyncio.gather(
+                client.forecast_dataset(verified_payload),
+                optional_water_context(),
+            )
+        except BaseException:
+            fetch_task.cancel()
+            raise
         sources = list(dataset.sources)
         if water_context.availability == "available":
             variables = [
@@ -440,10 +489,12 @@ async def forecast_decision(
             update={"coastal_water_context": water_context, "sources": sources}
         )
         decision = engine.evaluate(dataset)
+        wave_fetch = _wave_fetch_diagnostic(verified_payload, decision, await fetch_task)
         return decision.model_copy(
             update={
                 "spot_profile": verified_spot,
                 "automated_shore_profile": shore_profile,
+                "wave_fetch_diagnostic": wave_fetch,
             }
         )
     except UpstreamDataError as exc:

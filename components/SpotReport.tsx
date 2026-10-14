@@ -90,6 +90,7 @@ const holdingMechanismLabels: Record<string, string> = {
 
 const decisionReasonLabels = {
   safe_window: "نافذة اجتازت الحدود الآلية وقابلة للتنفيذ مبدئياً؛ ليست شهادة سلامة ميدانية",
+  caution_only_windows: "ساعات مفتوحة بتحذير احترازي فقط؛ لا توجد ساعة بلا تحذير",
   safety_hazard: "خطر سلامة",
   field_infeasible: "صعوبة مرتفعة متوقعة في تثبيت الخط",
   critical_data_missing: "نقص بيانات حرجة",
@@ -632,7 +633,6 @@ export function SpotReport({ result, request, stale = false, onClose }: SpotRepo
         <div className="report-actions" aria-live="polite">
           <button type="button" onClick={handleCopy}><Copy size={16} />{copyState === "done" ? "تم النسخ" : copyState === "error" ? "تعذّر النسخ" : "انسخ التقرير"}</button>
           <button type="button" onClick={handleDownload}><Download size={16} />نزّل TXT</button>
-          <button type="button" onClick={() => void copyText(JSON.stringify({ request, result }, null, 2))}><Copy size={16} />نسخ خام (تطوير)</button>
           <button type="button" onClick={handleWhatsAppShare}><MessageCircle size={16} />واتساب</button>
           <button type="button" onClick={handlePrint}><Printer size={16} />اطبع / PDF</button>
           <button className="report-close" type="button" onClick={onClose}><X size={18} />أغلق</button>

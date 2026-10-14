@@ -496,8 +496,19 @@ class CoastOrientationClient:
                                 payload.get("elements") if isinstance(payload, dict) else None
                             )
                             if not isinstance(elements, list) or not elements:
+                                LOGGER.info(
+                                    "Overpass orientation empty server=%s radius=%s",
+                                    server,
+                                    radius,
+                                )
                                 failures.append(f"{server}: لا توجد هندسة ضمن {radius} م")
                                 continue
+                            LOGGER.info(
+                                "Overpass orientation elements server=%s radius=%s count=%s",
+                                server,
+                                radius,
+                                len(elements),
+                            )
                             result = calculate_orientation(
                                 elements,
                                 latitude=latitude,

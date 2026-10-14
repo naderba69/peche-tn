@@ -21,7 +21,7 @@ from spotdata.services.cache import AsyncTTLCache
 
 LOGGER = logging.getLogger(__name__)
 EARTH_RADIUS_M = 6_371_008.8
-ORIENTATION_SEARCH_BUDGET_S = 8
+ORIENTATION_SEARCH_BUDGET_S = 25
 SEARCH_RADII_M = (3_000, 5_000, 10_000)
 MAX_SHORE_FEATURE_DISTANCE_M = 100.0
 

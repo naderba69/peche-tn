@@ -275,8 +275,10 @@ function buildFieldGuidance(
     "هذا التقرير لقطة وقتية، موش متابعة مباشرة للبحر؛ أعد التحليل قريباً من وقت الانطلاق وتثبت من اتصالك ووقت آخر تحديث.",
   ];
   const leadWindow = result.recommended_windows[0];
-  if (leadWindow) {
+  if (leadWindow && result.decision === "go") {
     guidance.push(`إن القرار اذهب: اخرج فقط من ${formatWindowRange(leadWindow.start, leadWindow.end)}. خارج هذه الساعات لا تخرج.`);
+  } else if (leadWindow && result.decision === "caution") {
+    guidance.push(`القرار حذر، لا اذهب كامل: الساعات المعروضة ${formatWindowRange(leadWindow.start, leadWindow.end)} بتحذيرات مذكورة في التقرير. لا تخرج قبل التحقق من التحذيرات ميدانياً.`);
   } else if (result.decision_context_ar?.length) {
     guidance.push(...result.decision_context_ar);
   } else {
@@ -308,11 +310,17 @@ function buildFieldGuidance(
     guidance.push("فحص التيار الساحبي ليس رصداً: راقب من مكان آمن ممراً داكناً أو خط رغوة/حطام يتحرك إلى عرض البحر، وابتعد عنه عند الشك.");
   }
 
-  const gustMaximum = maximum(numericValues(result.hourly, (hour) => hour.forecast.wind_gust_kmh));
+  // Gust guidance must use the same hours as the headline: the recommended window when one
+  // exists, otherwise the whole day, and the text says which scope it describes.
+  const gustHours = leadWindow
+    ? result.hourly.filter((hour) => hour.time >= leadWindow.start && hour.time < leadWindow.end)
+    : result.hourly;
+  const gustScope = leadWindow ? "داخل النافذة" : "خلال اليوم";
+  const gustMaximum = maximum(numericValues(gustHours, (hour) => hour.forecast.wind_gust_kmh));
   if (gustMaximum !== null && gustMaximum >= 40) {
-    guidance.push(`الهبات تصل نموذجياً إلى ${gustMaximum.toFixed(0)} كم/س؛ لا تحاول تعويض خطر الوقوف أو فقدان التوازن برصاص أثقل.`);
+    guidance.push(`الهبات ${gustScope} تصل نموذجياً إلى ${gustMaximum.toFixed(0)} كم/س؛ لا تحاول تعويض خطر الوقوف أو فقدان التوازن برصاص أثقل.`);
   } else if (gustMaximum !== null && gustMaximum >= 25) {
-    guidance.push(`الهبات تصل إلى ${gustMaximum.toFixed(0)} كم/س؛ راقب الفرق بين الريح المتوسطة والهبة قبل اختيار موضع الوقوف والمعدات.`);
+    guidance.push(`الهبات ${gustScope} تصل إلى ${gustMaximum.toFixed(0)} كم/س؛ راقب الفرق بين الريح المتوسطة والهبة قبل اختيار موضع الوقوف والمعدات.`);
   }
 
   const dominantRelation = dominant(result.hourly.map((hour) => hour.derived.wind_relation).filter((value) => value !== "unknown"));

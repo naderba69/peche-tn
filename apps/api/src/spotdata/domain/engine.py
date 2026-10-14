@@ -621,15 +621,16 @@ class DecisionEngine:
             field_feasibility,
             confidence,
         )
-        # Missing shore type is a caution, not an automatic NO_GO: the safety gates use the
-        # most conservative wave multiplier (see policy.safety_thresholds), and the gear
-        # recommendation is withheld because it depends on the shore.
+        # Missing shore type is a caution, never a GO and never an automatic NO_GO: the safety
+        # gates use the most conservative wave multiplier (see policy.safety_thresholds), and
+        # the gear recommendation is withheld because it depends on the shore.
         shore_type_missing = dataset.spot.shore_type is None
         decision_context_ar: list[str] = []
         if shore_type_missing:
             decision_context_ar.append(
                 "نوع الساحل غير موثّق (لا في OSM ولا يدوياً): حُسب القرار بأشد عتبة موج محافظة "
-                "ولم يُعرض عتاد مخصص للشاطئ. اختيار النوع يدوياً يرفع دقة الحساب."
+                "ولم يُعرض عتاد مخصص للشاطئ. لذلك لا يُصدر النظام «اذهب» حتى يُحدد النوع؛ "
+                "اختيار النوع يدوياً يرفع دقة الحساب."
             )
         fouling_evidence, satellite_proxy_force_majeure = self._fouling_evidence(
             dataset, field_feasibility
@@ -652,6 +653,11 @@ class DecisionEngine:
         ):
             decision = DecisionLevel.NO_GO
             decision_reason_code = DecisionReasonCode.TRIP_RUIN_CONFIRMED
+        if shore_type_missing and decision == DecisionLevel.GO:
+            # Unknown shore type must never produce GO (safety rule). The windows stay visible
+            # as caution windows; the summary explains exactly why.
+            decision = DecisionLevel.CAUTION
+            decision_reason_code = DecisionReasonCode.CAUTION_ONLY_WINDOWS
         if decision == DecisionLevel.NO_GO:
             recommended = []
         force_majeure_kind = _force_majeure_for(decision_reason_code)

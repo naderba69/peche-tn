@@ -1241,3 +1241,21 @@ def test_one_caution_stretch_does_not_erase_a_clean_go_run(
     )
     assert any(window.safety == DecisionLevel.GO for window in result.recommended_windows)
     assert result.decision == DecisionLevel.GO
+
+
+def test_unknown_shore_type_never_produces_go(
+    dataset_factory: Callable[..., ForecastDataset],
+) -> None:
+    # Safety rule: an unknown or missing shore type must never produce GO, even when every
+    # hour passes the automated gates. The same weather with a known shore type is GO.
+    start = datetime(2026, 9, 4, 0, tzinfo=ZoneInfo("Africa/Tunis"))
+    known = engine.evaluate(dataset_factory(count=96, start_at=start))
+    assert known.decision == DecisionLevel.GO
+
+    unknown = engine.evaluate(
+        dataset_factory(count=96, start_at=start, spot_updates={"shore_type": None})
+    )
+    assert unknown.decision == DecisionLevel.CAUTION
+    assert unknown.decision_reason_code == DecisionReasonCode.CAUTION_ONLY_WINDOWS
+    assert unknown.recommended_windows
+    assert "لا يُصدر النظام «اذهب»" in unknown.summary_ar

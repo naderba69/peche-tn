@@ -36,6 +36,7 @@ export interface OrientationEvidence {
   coastline_distance_m: number;
   search_radius_m: number;
   segments_used: number;
+  tangent_spread_deg?: number | null;
   confidence: "high" | "medium" | "low";
   provider: "OpenStreetMap Overpass";
   server: string;

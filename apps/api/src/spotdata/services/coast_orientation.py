@@ -350,6 +350,7 @@ def calculate_orientation(
         coastline_distance_m=round(segment.distance_m, 1),
         search_radius_m=search_radius_m,
         segments_used=segments_used,
+        tangent_spread_deg=round(spread, 1),
         confidence=confidence,
         server=server,
         calculated_at=resolved_at,

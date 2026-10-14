@@ -290,9 +290,7 @@ export function Planner({ value, loading, error, hasResult, isDirty, onChange, o
     : !orientationVerified
       ? orientationLoading
         ? "نجلب اتجاه الساحل الموثق…"
-        : orientationBlockers.length > 0
-          ? "محجوب: اتجاه الساحل لم يحقق شرط التوثيق"
-          : "محجوب: اتجاه الساحل غير موثق"
+        : "محجوب: اتجاه الساحل غير موثق"
       : isDirty
         ? "حدّث التقرير والقرار"
         : hasResult

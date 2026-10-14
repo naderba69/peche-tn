@@ -19,6 +19,26 @@ const viewports = [
 const LIVE_GO = process.env.PECHE_TN_LIVE_GO === "1";
 const LIVE_GO_SKIP_REASON = "needs a live-verified coastline orientation (Overpass); run with PECHE_TN_LIVE_GO=1";
 
+// Layout and planner tests must not depend on live Overpass latency: the startup
+// auto-fetch would otherwise keep the action button in its loading label for as long
+// as a public mirror takes. Tests that need a specific orientation register their own
+// route, which takes precedence. Live-GO runs keep the real network path.
+test.beforeEach(async ({ page }) => {
+  if (LIVE_GO) return;
+  await page.route("**/api/v1/spots/orientation", async (route) => {
+    await route.fulfill({
+      status: 200,
+      contentType: "application/json",
+      body: JSON.stringify({
+        status: "unavailable",
+        orientation_deg: null,
+        evidence: null,
+        reasons_ar: ["اختبار: لا يُستعمل Overpass الحقيقي في اختبارات التخطيط."],
+      }),
+    });
+  });
+});
+
 // Clicks the first preset chip that is not already selected and waits for the real orientation response.
 // Then analyzes only if the API verified the coastline; otherwise the analyze button stays blocked.
 async function analyzeFirstVerifiedSpot(page: Page) {

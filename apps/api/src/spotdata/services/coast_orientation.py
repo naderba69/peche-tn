@@ -21,6 +21,7 @@ from spotdata.services.cache import AsyncTTLCache
 
 LOGGER = logging.getLogger(__name__)
 EARTH_RADIUS_M = 6_371_008.8
+ORIENTATION_SEARCH_BUDGET_S = 8
 SEARCH_RADII_M = (3_000, 5_000, 10_000)
 MAX_SHORE_FEATURE_DISTANCE_M = 100.0
 
@@ -469,7 +470,9 @@ class CoastOrientationClient:
         failures: list[str] = []
         best: AutoOrientationResponse | None = None
         try:
-            async with asyncio.timeout(25):
+            # Bounded search budget: the UI waits for this result before the planner can
+            # render an actionable state. On expiry we return the strongest result seen.
+            async with asyncio.timeout(ORIENTATION_SEARCH_BUDGET_S):
                 for radius in SEARCH_RADII_M:
                     query = (
                         "[out:json][timeout:12];("
@@ -524,7 +527,7 @@ class CoastOrientationClient:
                             )
                             failures.append(f"{server}: تعذر الاتصال أو تحليل الاستجابة")
         except TimeoutError:
-            failures.append("انتهت مهلة Overpass الكلية بعد 25 ثانية")
+            failures.append(f"انتهت مهلة Overpass الكلية بعد {ORIENTATION_SEARCH_BUDGET_S} ثوانٍ")
 
         if best is not None:
             return best

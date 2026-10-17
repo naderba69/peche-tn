@@ -56,6 +56,8 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         app.state.coast_orientation = CoastOrientationClient(
             http_client=http_client,
             servers=settings.overpass_servers,
+            mirror_failure_threshold=settings.overpass_mirror_failures,
+            mirror_cooldown_seconds=settings.overpass_mirror_cooldown_seconds,
         )
         app.state.copernicus_water = CopernicusWaterClient(http_client=http_client)
         app.state.gemini = GeminiClient(

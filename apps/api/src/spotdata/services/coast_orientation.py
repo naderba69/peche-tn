@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import math
+import time
 from collections.abc import Sequence
 from dataclasses import dataclass
 from datetime import UTC, datetime
@@ -22,8 +23,143 @@ from spotdata.services.cache import AsyncTTLCache
 LOGGER = logging.getLogger(__name__)
 EARTH_RADIUS_M = 6_371_008.8
 ORIENTATION_SEARCH_BUDGET_S = 25
+# Per-mirror read timeout by search radius. One flat 8 s ceiling decides how much budget a
+# single unresponsive mirror eats: three of them burn 24 s at the *first* radius and the wider
+# radii are never reached, which is exactly the shape of the production outage logs. A small
+# radius should answer fast, so it gets the tightest ceiling; a wide radius legitimately needs
+# longer and is allowed more.
+ORIENTATION_MIRROR_TIMEOUT_BY_RADIUS_S = {3_000: 6.0, 5_000: 8.0, 10_000: 10.0}
+ORIENTATION_MIRROR_TIMEOUT_S = 8.0
+# Leave room for at least one more mirror attempt inside the global budget; below this
+# remaining time a new request is pointless because its answer would be discarded.
+ORIENTATION_MIRROR_MIN_TIME_S = 1.5
 SEARCH_RADII_M = (3_000, 5_000, 10_000)
+COASTLINE_FETCH_TIMEOUT_S = 6.0
+COASTLINE_SEARCH_BUDGET_S = 7.0
 MAX_SHORE_FEATURE_DISTANCE_M = 100.0
+# Public Overpass mirrors degrade for minutes at a time (queueing, 429/504, read timeouts).
+# Probing a dead mirror once per search radius, per request, per spot multiplies into a
+# request storm against a mirror that is already refusing work. A mirror that keeps failing
+# is therefore parked briefly and retried on a probe schedule instead.
+MIRROR_FAILURE_THRESHOLD = 3
+MIRROR_COOLDOWN_S = 90.0
+# Once every mirror is parked the cooldown cannot wait passively, so a shared probe
+# interval lets a recovering mirror rejoin without turning the outage into a dead end.
+MIRROR_PROBE_INTERVAL_S = 10.0
+# HTTP statuses that mean "the mirror is unhealthy or rate-limiting us", not "no data".
+_MIRROR_RETRY_STATUSES = frozenset({408, 425, 429, 500, 502, 503, 504})
+# Transient upstream faults: the mirror is at fault, the point on the map is not.
+# ``httpx.CancelledError`` is a ``TransportError`` subclass, so caller-side cancellation
+# (never swallowed here) still propagates as a plain ``asyncio.CancelledError``.
+_MIRROR_ERRORS = (httpx.HTTPError, TimeoutError, ValueError, TypeError)
+
+
+@dataclass(slots=True)
+class _MirrorState:
+    server: str
+    consecutive_failures: int = 0
+    opened_at: float | None = None
+    last_probe_at: float | None = None
+
+    @property
+    def status(self) -> str:
+        return "open" if self.opened_at is not None else "closed"
+
+
+class _MirrorBreaker:
+    """Per-mirror consecutive-failure breaker with half-open probing.
+
+    Health is process-local and deliberately shares no state with the result cache: a
+    parked mirror must never turn into an ``unavailable`` answer for the user, only into a
+    skipped candidate while another mirror is tried.
+    """
+
+    def __init__(
+        self,
+        servers: Sequence[str],
+        *,
+        threshold: int = MIRROR_FAILURE_THRESHOLD,
+        cooldown_s: float = MIRROR_COOLDOWN_S,
+        probe_interval_s: float = MIRROR_PROBE_INTERVAL_S,
+    ) -> None:
+        self._states = {server: _MirrorState(server=server) for server in servers}
+        self._threshold = max(1, threshold)
+        self._cooldown = cooldown_s
+        self._probe_interval = probe_interval_s
+
+    def is_eligible(self, server: str, now: float) -> bool:
+        state = self._states.get(server)
+        if state is None or state.opened_at is None:
+            return True
+        if now - state.opened_at >= self._cooldown:
+            # Full cooldown elapsed: the mirror is healthy again until proven otherwise, so
+            # the park is lifted rather than kept as a permanent mark.
+            state.opened_at = None
+            state.last_probe_at = None
+            state.consecutive_failures = self._threshold - 1
+            return True
+        if state.last_probe_at is None or now - state.last_probe_at >= self._probe_interval:
+            state.last_probe_at = now
+            return True
+        return False
+
+    def eligible_servers(self, servers: Sequence[str], now: float) -> tuple[str, ...]:
+        eligible = tuple(server for server in servers if self.is_eligible(server, now))
+        # Every mirror parked and still cooling down: probing anyway is strictly better
+        # than answering "unavailable" while OSM may already be healthy again.
+        return eligible if eligible else tuple(servers)
+
+    def record_success(self, server: str) -> None:
+        state = self._states.get(server)
+        if state is None:
+            return
+        if state.opened_at is not None:
+            LOGGER.info("Overpass mirror recovered server=%s", server)
+        state.consecutive_failures = 0
+        state.opened_at = None
+        state.last_probe_at = None
+
+    def record_failure(self, server: str, now: float) -> None:
+        state = self._states.get(server)
+        if state is None:
+            return
+        state.consecutive_failures += 1
+        if state.opened_at is None and state.consecutive_failures >= self._threshold:
+            state.opened_at = now
+            # The call that tripped the breaker *is* the first probe; without this the next
+            # search radius of the same request would immediately probe it again.
+            state.last_probe_at = now
+            LOGGER.warning(
+                "Overpass mirror parked server=%s failures=%s cooldown=%.0fs",
+                server,
+                state.consecutive_failures,
+                self._cooldown,
+            )
+
+    def snapshot(self) -> list[dict[str, object]]:
+        now = time.monotonic()
+        return [
+            {
+                "server": state.server,
+                "status": state.status,
+                "consecutive_failures": state.consecutive_failures,
+                "retry_in_seconds": (
+                    round(max(0.0, state.opened_at + self._cooldown - now), 1)
+                    if state.opened_at is not None
+                    else None
+                ),
+            }
+            for state in self._states.values()
+        ]
+
+
+@dataclass(frozen=True, slots=True)
+class _MirrorAttempt:
+    """Outcome of one Overpass request. ``fail`` is the mirror's fault; ``empty`` is the map's."""
+
+    outcome: str
+    response: AutoOrientationResponse | None = None
+    detail: str = ""
 
 
 @dataclass(frozen=True, slots=True)
@@ -387,15 +523,51 @@ def _orientation_rank(result: AutoOrientationResponse) -> tuple[int, float]:
     return (_CONFIDENCE_RANK.get(evidence.confidence, -1), -evidence.coastline_distance_m)
 
 
+def _coastline_query(latitude: float, longitude: float, radius_m: int) -> str:
+    """Wide coastline-only geometry lookup for the optional fetch-shading diagnostic."""
+    return (
+        "[out:json][timeout:20];"
+        f'way(around:{radius_m},{latitude},{longitude})["natural"="coastline"];'
+        "out geom;"
+    )
+
+
+def _orientation_query(latitude: float, longitude: float, radius_m: int) -> str:
+    """Bounded Overpass union for coastline geometry plus explicitly classifiable shore ways.
+
+    One deliberate narrowing versus the previous union: a ``natural=beach`` way is fetched only
+    when it carries a substrate the classifier can actually read. Bare beach ways were
+    downloaded at every radius on every mirror and then dropped by ``_classify_shore_tags``,
+    which is pure timeout risk on a loaded public mirror for an element that can never be used.
+    ``out meta`` stays, because shore-type evidence needs the feature version and timestamp.
+    """
+    bounds = f"around:{radius_m},{latitude},{longitude}"
+    blocks = [
+        f'way({bounds})["natural"="coastline"]',
+        f'way({bounds})["natural"~"^(cliff|bare_rock)$"]',
+        f'way({bounds})["natural"="beach"]["surface"~"^(sand|fine_sand)$"]',
+        f'way({bounds})["man_made"~"^(jetty|breakwater)$"]',
+        f'way({bounds})["breakwater"]',
+    ]
+    return f"[out:json][timeout:12];({''.join(block + ';' for block in blocks)});out meta geom;"
+
+
 class CoastOrientationClient:
     def __init__(
         self,
         *,
         http_client: httpx.AsyncClient,
         servers: tuple[str, ...],
+        mirror_failure_threshold: int = MIRROR_FAILURE_THRESHOLD,
+        mirror_cooldown_seconds: float = MIRROR_COOLDOWN_S,
     ) -> None:
         self._http_client = http_client
         self._servers = servers
+        self._mirrors = _MirrorBreaker(
+            servers,
+            threshold=mirror_failure_threshold,
+            cooldown_s=mirror_cooldown_seconds,
+        )
         self.cache: AsyncTTLCache[tuple[float, float], AutoOrientationResponse] = AsyncTTLCache(
             ttl_seconds=24 * 60 * 60,
             max_entries=256,
@@ -420,25 +592,39 @@ class CoastOrientationClient:
     async def _coastline_uncached(
         self, latitude: float, longitude: float, radius_m: int
     ) -> tuple[tuple[tuple[float, float], tuple[float, float]], ...] | None:
-        query = (
-            "[out:json][timeout:20];"
-            f'way(around:{radius_m},{latitude},{longitude})["natural"="coastline"];'
-            "out geom;"
-        )
-        for server in self._servers:
+        query = _coastline_query(latitude, longitude, radius_m)
+        # The caller wraps this in its own short wait: a 30 km geometry fetch is optional
+        # context for the wave-shading diagnostic, so a parked mirror must not consume the
+        # whole window. Stop as soon as a further attempt could not finish in time.
+        deadline = time.monotonic() + COASTLINE_SEARCH_BUDGET_S
+        for server in self._mirrors.eligible_servers(self._servers, time.monotonic()):
+            if deadline - time.monotonic() < 1.0:
+                LOGGER.info("Overpass coastline fetch budget exhausted radius=%s", radius_m)
+                return None
             try:
-                async with asyncio.timeout(25):
+                async with asyncio.timeout(max(1.0, deadline - time.monotonic())):
                     response = await self._http_client.get(
                         server,
                         params={"data": query},
-                        timeout=20.0,
+                        timeout=COASTLINE_FETCH_TIMEOUT_S,
                         headers={"Accept": "application/json"},
                     )
+                if response.status_code in _MIRROR_RETRY_STATUSES:
+                    self._mirrors.record_failure(server, time.monotonic())
+                    LOGGER.warning(
+                        "Overpass coastline fetch rejected server=%s status=%s",
+                        server,
+                        response.status_code,
+                    )
+                    continue
                 response.raise_for_status()
                 payload: Any = response.json()
                 elements = payload.get("elements") if isinstance(payload, dict) else None
                 if not isinstance(elements, list):
+                    # A 200 that is not a JSON element list is a broken mirror, not an empty sea.
+                    self._mirrors.record_failure(server, time.monotonic())
                     continue
+                self._mirrors.record_success(server)
                 segments: list[tuple[tuple[float, float], tuple[float, float]]] = []
                 for element in elements:
                     geometry = _valid_geometry(element)
@@ -447,7 +633,8 @@ class CoastOrientationClient:
                     )
                 if segments:
                     return tuple(segments)
-            except (httpx.HTTPError, ValueError, TypeError, TimeoutError) as exc:
+            except _MIRROR_ERRORS as exc:
+                self._mirrors.record_failure(server, time.monotonic())
                 LOGGER.warning(
                     "Overpass coastline fetch failed server=%s type=%s",
                     server,
@@ -469,80 +656,91 @@ class CoastOrientationClient:
     async def _resolve_uncached(self, latitude: float, longitude: float) -> AutoOrientationResponse:
         failures: list[str] = []
         best: AutoOrientationResponse | None = None
+        started_at = time.monotonic()
+        deadline = started_at + ORIENTATION_SEARCH_BUDGET_S
+        eligible: tuple[str, ...] = self._servers
         try:
             # Bounded search budget: the UI waits for this result before the planner can
             # render an actionable state. On expiry we return the strongest result seen.
             async with asyncio.timeout(ORIENTATION_SEARCH_BUDGET_S):
                 for radius in SEARCH_RADII_M:
-                    query = (
-                        "[out:json][timeout:12];("
-                        f'way(around:{radius},{latitude},{longitude})["natural"="coastline"];'
-                        f'way(around:{radius},{latitude},{longitude})["natural"~"^(beach|cliff|bare_rock)$"];'
-                        f'way(around:{radius},{latitude},{longitude})["man_made"~"^(jetty|breakwater)$"];'
-                        f'way(around:{radius},{latitude},{longitude})["breakwater"];'
-                        ");out meta geom;"
-                    )
-                    for server in self._servers:
-                        try:
-                            response = await self._http_client.get(
-                                server,
-                                params={"data": query},
-                                timeout=8.0,
-                                headers={"Accept": "application/json"},
+                    query = _orientation_query(latitude, longitude, radius)
+                    eligible = self._mirrors.eligible_servers(self._servers, time.monotonic())
+                    for server in eligible:
+                        remaining = deadline - time.monotonic()
+                        if remaining < ORIENTATION_MIRROR_MIN_TIME_S:
+                            failures.append(
+                                "لم يتبقَّ وقت كافٍ ضمن ميزانية البحث لتجربة مزوّد آخر؛ "
+                                "أُعيدت أقوى نتيجة متوفرة."
                             )
-                            response.raise_for_status()
-                            payload: Any = response.json()
-                            elements = (
-                                payload.get("elements") if isinstance(payload, dict) else None
-                            )
-                            if not isinstance(elements, list) or not elements:
-                                LOGGER.info(
-                                    "Overpass orientation empty server=%s radius=%s",
-                                    server,
-                                    radius,
-                                )
-                                failures.append(f"{server}: لا توجد هندسة ضمن {radius} م")
-                                continue
-                            LOGGER.info(
-                                "Overpass orientation elements server=%s radius=%s count=%s",
-                                server,
-                                radius,
-                                len(elements),
-                            )
-                            result = calculate_orientation(
-                                elements,
-                                latitude=latitude,
-                                longitude=longitude,
-                                search_radius_m=radius,
-                                server=server,
-                            )
-                            if result.status == "resolved":
-                                # Keep searching: a mirror or radius can return a
-                                # weaker geometry for the same point. Return the first
-                                # result that meets the verification rules; otherwise
-                                # the strongest one seen (never a silent first-answer).
-                                if _meets_verified_rules(result):
-                                    return result
-                                if best is None or _orientation_rank(result) > _orientation_rank(
-                                    best
-                                ):
-                                    best = result
-                            else:
-                                failures.extend(result.reasons_ar)
-                        except (httpx.HTTPError, ValueError, TypeError) as exc:
-                            LOGGER.warning(
-                                "Overpass orientation failed server=%s radius=%s type=%s",
-                                server,
-                                radius,
-                                type(exc).__name__,
-                            )
-                            failures.append(f"{server}: تعذر الاتصال أو تحليل الاستجابة")
+                            return self._finalize(best, failures, eligible, started_at)
+                        result = await self._attempt_orientation(
+                            server,
+                            query,
+                            radius,
+                            latitude,
+                            longitude,
+                            timeout_s=min(
+                                ORIENTATION_MIRROR_TIMEOUT_BY_RADIUS_S.get(
+                                    radius, ORIENTATION_MIRROR_TIMEOUT_S
+                                ),
+                                remaining,
+                            ),
+                        )
+                        if result.outcome == "ok":
+                            assert result.response is not None
+                            self._mirrors.record_success(server)
+                            # Keep searching: a mirror or radius can return a
+                            # weaker geometry for the same point. Return the first
+                            # result that meets the verification rules; otherwise
+                            # the strongest one seen (never a silent first-answer).
+                            if _meets_verified_rules(result.response):
+                                return result.response
+                            if best is None or _orientation_rank(
+                                result.response
+                            ) > _orientation_rank(best):
+                                best = result.response
+                        elif result.outcome == "empty":
+                            # A valid answer with no elements is a property of the map, not of
+                            # the mirror — an inland or un-surveyed point must never park a
+                            # healthy mirror for every other user.
+                            self._mirrors.record_success(server)
+                            failures.append(f"{server}: لا توجد هندسة ضمن {radius} م")
+                        else:
+                            self._mirrors.record_failure(server, time.monotonic())
+                            failures.append(f"{server}: {result.detail}")
+                    if deadline - time.monotonic() < ORIENTATION_MIRROR_MIN_TIME_S:
+                        failures.append(
+                            "لم يتبقَّ وقت كافٍ ضمن ميزانية البحث لتجربة نصف قطر أوسع؛ "
+                            "أُعيدت أقوى نتيجة متوفرة."
+                        )
+                        break
         except TimeoutError:
             failures.append(f"انتهت مهلة Overpass الكلية بعد {ORIENTATION_SEARCH_BUDGET_S} ثوانٍ")
 
+        return self._finalize(best, failures, eligible, started_at)
+
+    def _finalize(
+        self,
+        best: AutoOrientationResponse | None,
+        failures: list[str],
+        eligible: Sequence[str],
+        started_at: float,
+    ) -> AutoOrientationResponse:
         if best is not None:
             return best
-
+        parked = [server for server in self._servers if server not in set(eligible)]
+        if parked:
+            LOGGER.info(
+                "Overpass orientation served without parked mirrors parked=%s elapsed=%.1fs",
+                ",".join(parked),
+                time.monotonic() - started_at,
+            )
+            failures.append(
+                "تم تجاوز مزوّد Overpass غير الصحي مؤقتاً ("
+                + "، ".join(parked)
+                + ") بدل انتظار مهلته؛ يعود تلقائياً بعد فترة الاستراحة."
+            )
         return AutoOrientationResponse(
             status="unavailable",
             reasons_ar=(
@@ -552,3 +750,70 @@ class CoastOrientationClient:
                 ]
             ),
         )
+
+    def mirror_health(self) -> list[dict[str, object]]:
+        """Breaker state for `/api/health`, so a parked mirror is visible without log spelunking."""
+        return self._mirrors.snapshot()
+
+    async def _attempt_orientation(
+        self,
+        server: str,
+        query: str,
+        radius: int,
+        latitude: float,
+        longitude: float,
+        *,
+        timeout_s: float,
+    ) -> _MirrorAttempt:
+        try:
+            response = await self._http_client.get(
+                server,
+                params={"data": query},
+                timeout=timeout_s,
+                headers={"Accept": "application/json"},
+            )
+            if response.status_code in _MIRROR_RETRY_STATUSES:
+                return _MirrorAttempt(
+                    outcome="fail",
+                    detail=f"استجابة المزوّد {response.status_code}",
+                )
+            response.raise_for_status()
+            payload: Any = response.json()
+            elements = payload.get("elements") if isinstance(payload, dict) else None
+            if not isinstance(elements, list):
+                # A 200 that is not a JSON element list is the mirror misbehaving.
+                return _MirrorAttempt(outcome="fail", detail="استجابة بلا قائمة عناصر صالحة")
+            if not elements:
+                LOGGER.info(
+                    "Overpass orientation empty server=%s radius=%s",
+                    server,
+                    radius,
+                )
+                return _MirrorAttempt(outcome="empty", detail="لا توجد هندسة")
+            LOGGER.info(
+                "Overpass orientation elements server=%s radius=%s count=%s",
+                server,
+                radius,
+                len(elements),
+            )
+            return _MirrorAttempt(
+                outcome="ok",
+                response=calculate_orientation(
+                    elements,
+                    latitude=latitude,
+                    longitude=longitude,
+                    search_radius_m=radius,
+                    server=server,
+                ),
+            )
+        except _MIRROR_ERRORS as exc:
+            LOGGER.warning(
+                "Overpass orientation failed server=%s radius=%s type=%s",
+                server,
+                radius,
+                type(exc).__name__,
+            )
+            return _MirrorAttempt(
+                outcome="fail",
+                detail=f"تعذر الاتصال أو تحليل الاستجابة ({type(exc).__name__})",
+            )

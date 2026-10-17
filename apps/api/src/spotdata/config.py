@@ -19,6 +19,11 @@ class Settings:
     marine_url: str
     observation_url: str
     overpass_servers: tuple[str, ...]
+    # A public Overpass mirror that keeps timing out is parked for this long instead of being
+    # retried on every search radius of every request. Cooldown never fabricates an answer:
+    # it only stops wasting the request budget on a mirror that is not going to reply.
+    overpass_mirror_failures: int
+    overpass_mirror_cooldown_seconds: float
     gemini_base_url: str
     gemini_model: str
     upstream_timeout_seconds: float
@@ -52,6 +57,10 @@ class Settings:
                 "https://overpass-api.de/api/interpreter,"
                 "https://overpass.kumi.systems/api/interpreter,"
                 "https://overpass.openstreetmap.fr/api/interpreter",
+            ),
+            overpass_mirror_failures=int(os.getenv("OVERPASS_MIRROR_FAILURES", "3")),
+            overpass_mirror_cooldown_seconds=float(
+                os.getenv("OVERPASS_MIRROR_COOLDOWN_SECONDS", "90")
             ),
             gemini_base_url=os.getenv(
                 "GEMINI_BASE_URL", "https://generativelanguage.googleapis.com/v1beta"

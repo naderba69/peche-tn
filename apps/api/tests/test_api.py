@@ -29,6 +29,14 @@ def test_health_and_methodology() -> None:
         assert health.json()["schema_version"] == "3.20"
         assert health.json()["upstream_cache"]["scope"] == "process_memory"
         assert health.json()["satellite_cache"]["scope"] == "process_memory"
+        # A parked Overpass mirror is the only visible trace of an upstream degradation that
+        # never surfaces as a 5xx, so it has to be reported here rather than only in logs.
+        coast = health.json()["coast_orientation"]
+        assert coast["cache_entries"] == 0
+        mirrors = coast["mirrors"]
+        assert mirrors
+        assert all(entry["status"] == "closed" for entry in mirrors)
+        assert all(entry["consecutive_failures"] == 0 for entry in mirrors)
         assert health.headers["X-Request-ID"]
         method = client.get("/api/methodology")
         assert method.status_code == 200

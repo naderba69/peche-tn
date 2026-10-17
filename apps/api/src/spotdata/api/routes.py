@@ -175,6 +175,7 @@ async def root() -> dict[str, str]:
 async def health(request: Request) -> dict[str, object]:
     client: OpenMeteoClient = request.app.state.open_meteo
     water_client: CopernicusWaterClient = request.app.state.copernicus_water
+    coast_client: CoastOrientationClient = request.app.state.coast_orientation
     return {
         "status": "ok",
         "version": __version__,
@@ -192,6 +193,13 @@ async def health(request: Request) -> dict[str, object]:
             "hits": water_client.cache.hits,
             "misses": water_client.cache.misses,
             "scope": "process_memory",
+        },
+        # Overpass mirrors that are parked after repeated timeouts. Surfaced because a
+        # mirror outage shows up in the UI as a slower-but-still-resolved orientation, never
+        # as a 5xx — the breaker state is the only signal that upstream is degraded.
+        "coast_orientation": {
+            "cache_entries": coast_client.cache.size,
+            "mirrors": coast_client.mirror_health(),
         },
     }
 

@@ -154,7 +154,32 @@ def test_parser_fails_when_no_common_times() -> None:
         )
 
 
-def test_get_json_retries_rate_limit_then_succeeds(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_get_json_does_not_retry_rate_limit(monkeypatch: pytest.MonkeyPatch) -> None:
+    # A 429 is answered with one attempt only: retrying adds load to the same shared quota.
+    monkeypatch.setattr(
+        "spotdata.services.open_meteo._RETRY_DELAYS_SECONDS", (0.0, 0.01, 0.02, 0.03)
+    )
+    calls = {"count": 0}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        calls["count"] += 1
+        return httpx.Response(429, headers={"retry-after": "1"})
+
+    async def run() -> None:
+        async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as http:
+            client = OpenMeteoClient(
+                http_client=http,
+                weather_url="https://api.open-meteo.com/v1/forecast",
+                marine_url="https://marine-api.open-meteo.com/v1/marine",
+            )
+            await client._get_json("https://api.open-meteo.com/v1/forecast", {}, "الطقس")
+
+    with pytest.raises(UpstreamDataError, match="تعذر جلب بيانات الطقس"):
+        asyncio.run(run())
+    assert calls["count"] == 1
+
+
+def test_get_json_still_retries_server_errors(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(
         "spotdata.services.open_meteo._RETRY_DELAYS_SECONDS", (0.0, 0.01, 0.02, 0.03)
     )
@@ -163,7 +188,7 @@ def test_get_json_retries_rate_limit_then_succeeds(monkeypatch: pytest.MonkeyPat
     def handler(request: httpx.Request) -> httpx.Response:
         calls["count"] += 1
         if calls["count"] < 3:
-            return httpx.Response(429, headers={"retry-after": "1"})
+            return httpx.Response(503)
         return httpx.Response(200, json={"ok": True})
 
     async def run() -> dict[str, object]:
@@ -175,12 +200,11 @@ def test_get_json_retries_rate_limit_then_succeeds(monkeypatch: pytest.MonkeyPat
             )
             return await client._get_json("https://api.open-meteo.com/v1/forecast", {}, "الطقس")
 
-    payload = asyncio.run(run())
-    assert payload == {"ok": True}
+    assert asyncio.run(run()) == {"ok": True}
     assert calls["count"] == 3
 
 
-def test_get_json_raises_after_repeated_rate_limits(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_get_json_raises_on_rate_limit_without_retry(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(
         "spotdata.services.open_meteo._RETRY_DELAYS_SECONDS", (0.0, 0.01, 0.02, 0.03)
     )
@@ -201,7 +225,7 @@ def test_get_json_raises_after_repeated_rate_limits(monkeypatch: pytest.MonkeyPa
 
     with pytest.raises(UpstreamDataError, match="تعذر جلب بيانات الطقس"):
         asyncio.run(run())
-    assert calls["count"] == 4
+    assert calls["count"] == 1
 
 
 def test_forecast_dataset_serves_stale_bundle_when_upstream_fails(

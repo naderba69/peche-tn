@@ -27,8 +27,10 @@ TUNIS_TZ = ZoneInfo("Africa/Tunis")
 # Backoff before each upstream attempt. 429s on the shared cloud egress IP are
 # usually short-lived; longer waits ride them out without hammering the provider.
 _RETRY_DELAYS_SECONDS = (0.0, 0.75, 2.0, 5.0)
+# Forecast inputs are hourly model runs; 30 minutes keeps repeated analyses of the same
+# point from re-fetching while staying close to the model update cadence.
+_FORECAST_CACHE_TTL_SECONDS = 1800
 # Upper bound for honouring an upstream Retry-After header inside one request.
-_MAX_RETRY_AFTER_SECONDS = 8.0
 # When a fresh upstream fetch fails, a recently cached bundle is served instead
 # of an error. 6 hours keeps the fallback useful without misleading staleness.
 _STALE_BUNDLE_SECONDS = 6 * 3600.0
@@ -152,7 +154,7 @@ class OpenMeteoClient:
             tuple[float, float, date, bool], tuple[float, _UpstreamBundle]
         ] = OrderedDict()
         self.cache: AsyncTTLCache[tuple[float, float, date, bool], _UpstreamBundle] = AsyncTTLCache(
-            ttl_seconds=600,
+            ttl_seconds=_FORECAST_CACHE_TTL_SECONDS,
             max_entries=256,
         )
 
@@ -377,7 +379,9 @@ class OpenMeteoClient:
                 status = (
                     exc.response.status_code if isinstance(exc, httpx.HTTPStatusError) else None
                 )
-                retryable = status is None or status == 429 or status >= 500
+                # HTTP 429 is never retried: every retry adds load to the same shared quota and
+                # makes the next analysis fail too. The stale-bundle fallback handles it instead.
+                retryable = status is None or status >= 500
                 LOGGER.warning(
                     "Open-Meteo %s request failed attempt=%s status=%s: %s",
                     source_label,
@@ -389,28 +393,12 @@ class OpenMeteoClient:
                     break
                 if attempt == len(_RETRY_DELAYS_SECONDS):
                     break
-                if isinstance(exc, httpx.HTTPStatusError) and status == 429:
-                    retry_after = _parse_retry_after(exc.response.headers.get("retry-after"))
-                    if retry_after is not None:
-                        await asyncio.sleep(min(retry_after, _MAX_RETRY_AFTER_SECONDS))
         details: dict[str, Any] = {"source": source_label}
         if isinstance(last_error, httpx.HTTPStatusError):
             details["status"] = last_error.response.status_code
         raise UpstreamDataError(
             f"تعذر جلب بيانات {source_label} من مزود الأرصاد.", details=details
         ) from last_error
-
-
-def _parse_retry_after(value: str | None) -> float | None:
-    if not value:
-        return None
-    try:
-        seconds = float(value)
-    except ValueError:
-        return None
-    if seconds <= 0.0:
-        return None
-    return seconds
 
 
 def parse_open_meteo(

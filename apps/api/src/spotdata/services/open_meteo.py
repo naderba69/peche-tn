@@ -248,24 +248,6 @@ class OpenMeteoClient:
             if include_current_observation
             else asyncio.sleep(0, result=[])
         )
-        secondary_marine_task = (
-            self._get_optional_json(
-                self._marine_url,
-                {**marine_params, "models": self._secondary_marine_model},
-                "البحر (نموذج ثانٍ)",
-            )
-            if self._secondary_marine_model
-            else asyncio.sleep(0, result=None)
-        )
-        secondary_weather_task = (
-            self._get_optional_json(
-                self._weather_url,
-                {**weather_params, "models": self._secondary_weather_model},
-                "الطقس (نموذج ثانٍ)",
-            )
-            if self._secondary_weather_model
-            else asyncio.sleep(0, result=None)
-        )
         copernicus_task = (
             self._copernicus.hourly_for_point(
                 float(marine_params["latitude"]),
@@ -277,20 +259,31 @@ class OpenMeteoClient:
             else asyncio.sleep(0, result=None)
         )
         try:
-            (
-                marine_result,
-                weather_result,
-                metar_result,
-                secondary_marine,
-                secondary_weather,
-                copernicus_marine,
-            ) = await asyncio.gather(
+            # Primary requests first. Each analysis costs two Open-Meteo calls here; the
+            # secondary models are fetched only when the primary has a gap they could fill.
+            marine_result, weather_result, metar_result, copernicus_marine = await asyncio.gather(
                 self._get_json(self._marine_url, marine_params, "البحر"),
                 self._get_json(self._weather_url, weather_params, "الطقس"),
                 observation_task,
-                secondary_marine_task,
-                secondary_weather_task,
                 copernicus_task,
+            )
+            secondary_marine, secondary_weather = await asyncio.gather(
+                self._secondary_if_gaps(
+                    self._marine_url,
+                    {**marine_params, "models": self._secondary_marine_model},
+                    marine_result,
+                    MARINE_VARIABLES,
+                    "البحر (نموذج ثانٍ)",
+                    enabled=bool(self._secondary_marine_model),
+                ),
+                self._secondary_if_gaps(
+                    self._weather_url,
+                    {**weather_params, "models": self._secondary_weather_model},
+                    weather_result,
+                    WEATHER_VARIABLES,
+                    "الطقس (نموذج ثانٍ)",
+                    enabled=bool(self._secondary_weather_model),
+                ),
             )
         except UpstreamDataError:
             raise
@@ -305,6 +298,26 @@ class OpenMeteoClient:
             secondary_weather=secondary_weather,
             copernicus_marine=copernicus_marine,
         )
+
+    async def _secondary_if_gaps(
+        self,
+        url: str,
+        params: dict[str, Any],
+        primary: dict[str, Any],
+        variables: tuple[str, ...],
+        source_label: str,
+        *,
+        enabled: bool,
+    ) -> dict[str, Any] | None:
+        """Call an optional secondary model only when the primary payload has a gap.
+
+        Secondary values are used only to fill None entries (see ``_fill_hourly_gaps``), so
+        skipping the call when the primary is complete does not change the forecast. It does
+        remove one upstream request per analysis, which is what triggered 429 responses.
+        """
+        if not enabled or not _has_hourly_gaps(primary, variables):
+            return None
+        return await self._get_optional_json(url, params, source_label)
 
     async def _get_optional_json(
         self, url: str, params: dict[str, Any], source_label: str
@@ -617,6 +630,18 @@ def _object(value: Any, path: str) -> dict[str, Any]:
     if not isinstance(value, dict):
         raise UpstreamDataError("بيانات مزود الأرصاد ناقصة.", details={"missing_or_invalid": path})
     return value
+
+
+def _has_hourly_gaps(payload: dict[str, Any], variables: tuple[str, ...]) -> bool:
+    """True when any requested hourly variable is missing or contains a None value."""
+    hourly = payload.get("hourly")
+    if not isinstance(hourly, dict):
+        return True
+    for variable in variables:
+        values = hourly.get(variable)
+        if not isinstance(values, list) or any(value is None for value in values):
+            return True
+    return False
 
 
 def _fill_hourly_gaps(

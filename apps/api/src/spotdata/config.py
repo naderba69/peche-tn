@@ -27,6 +27,10 @@ class Settings:
     gemini_base_url: str
     gemini_model: str
     upstream_timeout_seconds: float
+    # Whole-bundle ceiling for one fresh Open-Meteo fetch. Must stay well below the browser's
+    # own 45 s request timeout, otherwise the client aborts while the server is still inside a
+    # retry backoff and the cached-bundle fallback never gets a chance to answer.
+    upstream_fetch_budget_seconds: float
     # Independent second model family used ONLY to fill hourly gaps left by the primary
     # Open-Meteo blend. Empty string disables the secondary fetch entirely.
     secondary_marine_model: str = "meteofrance_wave"
@@ -67,6 +71,7 @@ class Settings:
             ).rstrip("/"),
             gemini_model=os.getenv("GEMINI_MODEL", "gemini-3.8-flash"),
             upstream_timeout_seconds=float(os.getenv("UPSTREAM_TIMEOUT_SECONDS", "15")),
+            upstream_fetch_budget_seconds=float(os.getenv("UPSTREAM_FETCH_BUDGET_SECONDS", "20")),
             secondary_marine_model=os.getenv(
                 "OPEN_METEO_SECONDARY_MARINE_MODEL", "meteofrance_wave"
             ).strip(),

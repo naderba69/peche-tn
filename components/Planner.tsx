@@ -558,7 +558,10 @@ export function Planner({ value, loading, error, hasResult, isDirty, onChange, o
         <div className="planner-error" id="planner-error" role="alert">
           <strong>ما قدرناش نكمّلوا التحليل</strong>
           <span>{error}</span>
-          <small>ثبّت اتصالك وعاود المحاولة. القرار السابق يبقى ظاهر إذا كان موجود.</small>
+          <small>
+            إعادة المحاولة بعد لحظات تكفي غالباً: الخطأ من مزوّد البيانات حين يذكر مزوّد الأرصاد، لا من
+            اتصالك. القرار السابق يبقى ظاهر إذا كان موجود.
+          </small>
           <button className="retry-action" type="button" disabled={loading} onClick={onSubmit}>عاود المحاولة</button>
         </div>
       )}

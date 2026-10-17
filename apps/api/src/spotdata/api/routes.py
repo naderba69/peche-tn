@@ -1,9 +1,10 @@
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import logging
 from datetime import UTC, datetime, timedelta
-from typing import Annotated
+from typing import Annotated, Any
 from zoneinfo import ZoneInfo
 
 from fastapi import APIRouter, Header, HTTPException, Request, status
@@ -62,6 +63,13 @@ GeminiApiKey = Annotated[
         description="Runtime-only Google AI Studio key; never persisted by the API",
     ),
 ]
+
+
+async def _drop_unawaited(task: asyncio.Task[Any]) -> None:
+    """Cancel a started-but-unneeded fetch and await the cancellation, never its answer."""
+    task.cancel()
+    with contextlib.suppress(Exception, asyncio.CancelledError):
+        await task
 
 
 def _missing_automated_spot_context(profile: AutoOrientationResponse) -> list[str]:
@@ -377,12 +385,27 @@ async def forecast_decision(
             },
         )
     coast_client: CoastOrientationClient = request.app.state.coast_orientation
-    automated_profile = await coast_client.resolve(
-        payload.location.latitude,
-        payload.location.longitude,
-    )
+    meteo_client: OpenMeteoClient = request.app.state.open_meteo
+    # The forecast fetch needs only the point, the date and the fixed full-day angler profile —
+    # never the shoreline. Awaiting the Overpass search before starting it serialized up to 25 s
+    # of mirror waiting in front of every analysis, so the browser gave up on "تعذر جلب بيانات
+    # البحر" while the weather provider was healthy and had not even been called. Both now run
+    # together; only the verified shoreline is re-applied to the bundle afterwards.
+    fetch_request = payload.model_copy(update={"angler": _full_day_angler_profile(payload.angler)})
+    forecast_task = asyncio.create_task(meteo_client.forecast_dataset(fetch_request))
+    try:
+        automated_profile = await coast_client.resolve(
+            payload.location.latitude,
+            payload.location.longitude,
+        )
+    except BaseException:
+        await _drop_unawaited(forecast_task)
+        raise
     missing_context = _missing_automated_spot_context(automated_profile)
     if missing_context:
+        # The safety gate still decides alone: the in-flight fetch is dropped rather than
+        # awaited, so a missing orientation can never come back as a partially analysed answer.
+        await _drop_unawaited(forecast_task)
         return _preflight_no_go(missing_context, automated_profile)
 
     assert automated_profile.orientation_deg is not None
@@ -402,7 +425,6 @@ async def forecast_decision(
         update={"spot": verified_spot, "angler": _full_day_angler_profile(payload.angler)}
     )
 
-    client: OpenMeteoClient = request.app.state.open_meteo
     water_client: CopernicusWaterClient = request.app.state.copernicus_water
 
     async def optional_water_context() -> CoastalWaterContext:
@@ -428,10 +450,14 @@ async def forecast_decision(
     try:
         fetch_task = asyncio.create_task(_coastline_for_diagnostic(coast_client, verified_payload))
         try:
-            dataset, water_context = await asyncio.gather(
-                client.forecast_dataset(verified_payload),
+            fetched, water_context = await asyncio.gather(
+                forecast_task,
                 optional_water_context(),
             )
+            # Everything the provider call could legitimately depend on was already normalized
+            # before it started; the verified shoreline is the one input that only exists after
+            # the Overpass search, so it is applied to the bundle here.
+            dataset = fetched.model_copy(update={"spot": verified_spot})
         except BaseException:
             fetch_task.cancel()
             raise

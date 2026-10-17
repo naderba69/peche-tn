@@ -57,6 +57,12 @@ class AsyncTTLCache(Generic[K, V]):
             if creator:
                 async with self._lock:
                     self._inflight.pop(key, None)
+                # The creator owns this task. If it is cancelled mid-await — a caller-side
+                # timeout, or a safety gate that decided the answer is no longer needed — then
+                # nobody will ever read the result, so the upstream work is stopped rather than
+                # left running unobserved (and its error left unretrieved).
+                if not task.done():
+                    task.cancel()
             raise
 
         if creator:

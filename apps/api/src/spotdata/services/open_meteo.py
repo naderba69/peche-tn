@@ -27,6 +27,21 @@ TUNIS_TZ = ZoneInfo("Africa/Tunis")
 # Backoff before each upstream attempt. 429s on the shared cloud egress IP are
 # usually short-lived; longer waits ride them out without hammering the provider.
 _RETRY_DELAYS_SECONDS = (0.0, 0.75, 2.0, 5.0)
+# A whole bundle (primary marine + primary weather + optional gap-fill + METAR) must resolve
+# inside this budget. Without it the retry schedule above is unbounded in the worst case:
+# 4 attempts x the 15 s client timeout plus backoff and Retry-After waits is ~90 s, while the
+# browser gives up at 45 s. The caller then shows "could not fetch sea data" for a request the
+# server was still going to answer — and the stale-bundle rescue below never gets to run,
+# because it only triggers when the fetch *fails*.
+_FETCH_BUDGET_SECONDS = 20.0
+# An attempt that cannot plausibly finish is not started: its answer would be discarded anyway.
+_MIN_ATTEMPT_SECONDS = 1.5
+# Total wall-clock budget for one fresh bundle. It has to be smaller than the browser's own
+# request timeout, otherwise the client aborts while the server is still sleeping through
+# backoff — and the stale fallback below never runs because the fetch never "finished".
+_FETCH_BUDGET_SECONDS = 20.0
+# An attempt with less than this left is not started: its answer could not be used.
+_MIN_ATTEMPT_SECONDS = 1.5
 # Upper bound for honouring an upstream Retry-After header inside one request.
 _MAX_RETRY_AFTER_SECONDS = 8.0
 # When a fresh upstream fetch fails, a recently cached bundle is served instead
@@ -136,6 +151,7 @@ class OpenMeteoClient:
         observation_url: str = "https://aviationweather.gov/api/data/metar",
         *,
         stale_seconds: float = _STALE_BUNDLE_SECONDS,
+        fetch_budget_seconds: float = _FETCH_BUDGET_SECONDS,
         secondary_marine_model: str = "",
         secondary_weather_model: str = "",
         copernicus_client: CopernicusWaveClient | None = None,
@@ -146,6 +162,7 @@ class OpenMeteoClient:
         self._marine_url = marine_url
         self._observation_url = observation_url
         self._stale_seconds = stale_seconds
+        self._fetch_budget = fetch_budget_seconds
         self._secondary_marine_model = secondary_marine_model
         self._secondary_weather_model = secondary_weather_model
         self._stale_bundles: OrderedDict[
@@ -194,6 +211,7 @@ class OpenMeteoClient:
         )
         cache_fallback_used = False
         cache_fallback_age_seconds: float | None = None
+        deadline = time.monotonic() + self._fetch_budget
         try:
             bundle = await self.cache.get_or_create(
                 cache_key,
@@ -201,6 +219,7 @@ class OpenMeteoClient:
                     marine_params,
                     weather_params,
                     include_current_observation=include_current_observation,
+                    deadline=deadline,
                 ),
             )
         except UpstreamDataError:
@@ -242,6 +261,7 @@ class OpenMeteoClient:
         weather_params: dict[str, Any],
         *,
         include_current_observation: bool,
+        deadline: float | None = None,
     ) -> _UpstreamBundle:
         observation_task = (
             self._get_optional_observations()
@@ -253,6 +273,7 @@ class OpenMeteoClient:
                 self._marine_url,
                 {**marine_params, "models": self._secondary_marine_model},
                 "البحر (نموذج ثانٍ)",
+                deadline=deadline,
             )
             if self._secondary_marine_model
             else asyncio.sleep(0, result=None)
@@ -262,6 +283,7 @@ class OpenMeteoClient:
                 self._weather_url,
                 {**weather_params, "models": self._secondary_weather_model},
                 "الطقس (نموذج ثانٍ)",
+                deadline=deadline,
             )
             if self._secondary_weather_model
             else asyncio.sleep(0, result=None)
@@ -276,22 +298,36 @@ class OpenMeteoClient:
             if self._copernicus is not None and self._copernicus.enabled
             else asyncio.sleep(0, result=None)
         )
+        # Hard ceiling for the bundle as a whole. The per-source attempts above stop starting
+        # new retries once the budget is gone, but the optional legs (station observation,
+        # gap-fill models, Copernicus) each still own a client-wide timeout, and one of them
+        # hanging is enough to blow the browser's patience. The raised UpstreamDataError is
+        # what lets the cached-bundle fallback answer instead of an error page.
+        budget = self._fetch_budget if deadline is None else max(0.0, deadline - time.monotonic())
         try:
-            (
-                marine_result,
-                weather_result,
-                metar_result,
-                secondary_marine,
-                secondary_weather,
-                copernicus_marine,
-            ) = await asyncio.gather(
-                self._get_json(self._marine_url, marine_params, "البحر"),
-                self._get_json(self._weather_url, weather_params, "الطقس"),
-                observation_task,
-                secondary_marine_task,
-                secondary_weather_task,
-                copernicus_task,
-            )
+            async with asyncio.timeout(budget):
+                (
+                    marine_result,
+                    weather_result,
+                    metar_result,
+                    secondary_marine,
+                    secondary_weather,
+                    copernicus_marine,
+                ) = await asyncio.gather(
+                    self._get_json(self._marine_url, marine_params, "البحر", deadline=deadline),
+                    self._get_json(self._weather_url, weather_params, "الطقس", deadline=deadline),
+                    observation_task,
+                    secondary_marine_task,
+                    secondary_weather_task,
+                    copernicus_task,
+                )
+        except TimeoutError as exc:
+            LOGGER.warning("Open-Meteo bundle budget of %.1fs exhausted", budget)
+            raise UpstreamDataError(
+                f"تعذر جلب بيانات الأرصاد المجانية (البحر والطقس): {_failure_clause(True, None)} "
+                f"داخل {budget:.1f} ثانية. {_UPSTREAM_HINT}",
+                details={"reason": "fetch_budget_exhausted", "budget_seconds": round(budget, 1)},
+            ) from exc
         except UpstreamDataError:
             raise
         except Exception as exc:
@@ -307,18 +343,23 @@ class OpenMeteoClient:
         )
 
     async def _get_optional_json(
-        self, url: str, params: dict[str, Any], source_label: str
+        self, url: str, params: dict[str, Any], source_label: str, *, deadline: float | None = None
     ) -> dict[str, Any] | None:
         # A secondary model must never make the primary forecast fail: one attempt, no
-        # retry storm, and any error simply means "no gap-filling this time".
+        # retry storm, and any error simply means "no gap-filling this time". It is also the
+        # first thing to drop when the bundle budget runs short — gap-filling is worth less
+        # than a late answer about the primary model.
+        if deadline is not None and deadline - time.monotonic() < _MIN_ATTEMPT_SECONDS:
+            LOGGER.info("Open-Meteo %s skipped: fetch budget exhausted", source_label)
+            return None
         try:
-            response = await self._http.get(url, params=params)
+            response = await self._http.get(url, params=params, timeout=_attempt_timeout(deadline))
             response.raise_for_status()
             payload = response.json()
             if not isinstance(payload, dict):
                 raise ValueError("JSON root is not an object")
             return payload
-        except (httpx.HTTPError, ValueError) as exc:
+        except (httpx.HTTPError, ValueError, TimeoutError) as exc:
             LOGGER.warning("Open-Meteo %s unavailable, gap-fill skipped: %s", source_label, exc)
             return None
 
@@ -342,14 +383,28 @@ class OpenMeteoClient:
             return []
 
     async def _get_json(
-        self, url: str, params: dict[str, Any], source_label: str
+        self, url: str, params: dict[str, Any], source_label: str, *, deadline: float | None = None
     ) -> dict[str, Any]:
         last_error: Exception | None = None
+        last_status: int | None = None
+        timed_out = False
+        attempts = 0
         for attempt, delay in enumerate(_RETRY_DELAYS_SECONDS, start=1):
+            if deadline is not None and deadline - time.monotonic() < _MIN_ATTEMPT_SECONDS:
+                # The remaining window cannot hold another request, and an answer that arrives
+                # after it is discarded by the caller anyway. Fail now so the stale-bundle
+                # fallback can run while the client is still waiting.
+                timed_out = True
+                break
             if delay:
-                await asyncio.sleep(delay)
+                await asyncio.sleep(
+                    delay if deadline is None else min(delay, max(0.0, deadline - time.monotonic()))
+                )
+            attempts = attempt
             try:
-                response = await self._http.get(url, params=params)
+                response = await self._http.get(
+                    url, params=params, timeout=_attempt_timeout(deadline)
+                )
                 if response.status_code == 429 or response.status_code >= 500:
                     raise httpx.HTTPStatusError(
                         "temporary upstream response", request=response.request, response=response
@@ -364,6 +419,8 @@ class OpenMeteoClient:
                 status = (
                     exc.response.status_code if isinstance(exc, httpx.HTTPStatusError) else None
                 )
+                if status is not None:
+                    last_status = status
                 retryable = status is None or status == 429 or status >= 500
                 LOGGER.warning(
                     "Open-Meteo %s request failed attempt=%s status=%s: %s",
@@ -379,13 +436,60 @@ class OpenMeteoClient:
                 if isinstance(exc, httpx.HTTPStatusError) and status == 429:
                     retry_after = _parse_retry_after(exc.response.headers.get("retry-after"))
                     if retry_after is not None:
-                        await asyncio.sleep(min(retry_after, _MAX_RETRY_AFTER_SECONDS))
-        details: dict[str, Any] = {"source": source_label}
-        if isinstance(last_error, httpx.HTTPStatusError):
-            details["status"] = last_error.response.status_code
+                        wait = min(retry_after, _MAX_RETRY_AFTER_SECONDS)
+                        if deadline is not None:
+                            wait = min(wait, max(0.0, deadline - time.monotonic()))
+                        await asyncio.sleep(wait)
+        details: dict[str, Any] = {
+            "source": source_label,
+            "attempts": attempts,
+            "budget_seconds": round(self._fetch_budget, 1),
+        }
+        if last_status is not None:
+            details["status"] = last_status
+        if timed_out:
+            details["reason"] = "fetch_budget_exhausted"
         raise UpstreamDataError(
-            f"تعذر جلب بيانات {source_label} من مزود الأرصاد.", details=details
+            f"تعذر جلب بيانات {source_label} من مزود الأرصاد: "
+            f"{_failure_clause(timed_out, last_status)}. {_UPSTREAM_HINT}",
+            details=details,
         ) from last_error
+
+
+# The old text told the user to check *their* connection while the failing party was the
+# provider. Retrying shortly is the actual remedy, so say that instead of blaming the client.
+_UPSTREAM_HINT = (
+    "المشكلة من مزوّد البيانات لا من اتصالك؛ إعادة المحاولة بعد لحظات هي العلاج، "
+    "ولا تُستعمل قيم مقدّرة في هذه الأثناء."
+)
+
+
+def _failure_clause(timed_out: bool, status: int | None) -> str:
+    """Name the actual upstream condition; "check your connection" is not a diagnosis."""
+    if timed_out:
+        return "لم يُجب المزوّد ضمن مهلة الجلب الكلية"
+    if status == 429:
+        return "المزوّد أبلغ عن تجاوز حصة الطلبات (429)"
+    if status is not None and status >= 500:
+        return f"المزوّد أعاد خطأ خدمياً ({status})"
+    if status is not None:
+        return f"رفض المزوّد الطلب ({status})"
+    return "تعذّر الوصول إلى المزوّد"
+
+
+def _attempt_timeout(deadline: float | None) -> httpx.Timeout | None:
+    """Per-attempt ceiling: never outlive the budget the bundle still has.
+
+    ``None`` keeps the shared client default. This is what turns "4 attempts x the 15 s client
+    timeout, unbounded" into a fetch that always answers — success, stale fallback, or a clear
+    error — inside the browser's own patience.
+    """
+    if deadline is None:
+        return None
+    remaining = deadline - time.monotonic()
+    if remaining <= _MIN_ATTEMPT_SECONDS:
+        return httpx.Timeout(_MIN_ATTEMPT_SECONDS, connect=1.0)
+    return httpx.Timeout(remaining, connect=min(5.0, remaining))
 
 
 def _parse_retry_after(value: str | None) -> float | None:

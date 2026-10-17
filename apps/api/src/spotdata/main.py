@@ -48,6 +48,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
             marine_url=settings.marine_url,
             observation_url=settings.observation_url,
             secondary_marine_model=settings.secondary_marine_model,
+            fetch_budget_seconds=settings.upstream_fetch_budget_seconds,
             secondary_weather_model=settings.secondary_weather_model,
             copernicus_client=CopernicusWaveClient(
                 settings.copernicus_username, settings.copernicus_password

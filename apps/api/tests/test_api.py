@@ -1,5 +1,7 @@
+import asyncio
+import time
 from collections.abc import Callable
-from datetime import datetime
+from datetime import date, datetime
 from unittest.mock import AsyncMock
 from zoneinfo import ZoneInfo
 
@@ -11,10 +13,12 @@ from spotdata.domain.models import (
     AutoOrientationResponse,
     Coordinates,
     ForecastDataset,
+    ForecastDecisionRequest,
     OrientationEvidence,
     SpotProfile,
 )
 from spotdata.main import app
+from spotdata.services.copernicus_water import unavailable_water_context
 
 TZ = ZoneInfo("Africa/Tunis")
 
@@ -345,3 +349,126 @@ def test_invalid_runtime_gemini_key_is_never_echoed() -> None:
     assert response.json()["detail"]["code"] == "invalid_gemini_key_format"
     assert private_value not in response.text
     assert response.headers["Cache-Control"] == "no-store"
+
+
+def _verified_profile() -> AutoOrientationResponse:
+    retrieved_at = datetime.now(TZ)
+    evidence = OrientationEvidence(
+        orientation_deg=135,
+        coastline_tangent_deg=45,
+        coastline_distance_m=37,
+        search_radius_m=3_000,
+        segments_used=4,
+        confidence="high",
+        provider="OpenStreetMap Overpass",
+        server="https://overpass.test/api",
+        calculated_at=retrieved_at,
+        limitations_ar=["test geometry"],
+    )
+    return AutoOrientationResponse(
+        status="resolved",
+        orientation_deg=135,
+        evidence=evidence,
+        shore_profile=AutomatedShoreProfile(
+            status="resolved",
+            retrieved_at=retrieved_at,
+            shore_type="sandy",
+            exposure=None,
+            evidence_feature_id=8123,
+            evidence_feature_version=4,
+            evidence_feature_timestamp=retrieved_at,
+            feature_distance_m=12,
+            raw_tags={"natural": "beach", "surface": "sand"},
+            confidence="high",
+            limitations_ar=["test map tags"],
+        ),
+        reasons_ar=["test map profile"],
+    )
+
+
+def _forecast_payload(today: date) -> dict[str, object]:
+    return {
+        "location": {"latitude": 36.8, "longitude": 10.3, "name": "اختبار"},
+        "target_date": today.isoformat(),
+        "spot": {
+            "seaward_orientation_deg": 12,
+            "orientation_source": "manual",
+            "shore_type": "rocky",
+            "exposure": "sheltered",
+        },
+        "angler": {"experience": "intermediate", "target_species": "general", "session_hours": 24},
+    }
+
+
+def test_forecast_runs_the_shore_search_and_the_provider_fetch_together(
+    dataset_factory: Callable[..., ForecastDataset],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The provider fetch must not queue behind mirror timeouts on the shoreline search."""
+    today = datetime.now(TZ).date()
+    dataset = dataset_factory(
+        target_date=today, count=96, start_at=datetime.combine(today, datetime.min.time(), TZ)
+    )
+    timeline: list[str] = []
+
+    async def slow_resolve(latitude: float, longitude: float) -> AutoOrientationResponse:
+        timeline.append("shore:start")
+        await asyncio.sleep(0.05)
+        timeline.append("shore:end")
+        return _verified_profile()
+
+    async def slow_fetch(request: ForecastDecisionRequest) -> ForecastDataset:
+        timeline.append("fetch:start")
+        await asyncio.sleep(0.01)
+        timeline.append("fetch:end")
+        return dataset
+
+    water = unavailable_water_context(dataset.location, dataset.spot, "synthetic test context")
+    with TestClient(app) as client:
+        monkeypatch.setattr(app.state.coast_orientation, "resolve", slow_resolve)
+        monkeypatch.setattr(app.state.open_meteo, "forecast_dataset", slow_fetch)
+        monkeypatch.setattr(
+            app.state.copernicus_water, "coastal_context", AsyncMock(return_value=water)
+        )
+        response = client.post("/api/v1/decisions/forecast", json=_forecast_payload(today))
+
+    assert response.status_code == 200, response.text
+    assert response.json()["spot_profile"]["seaward_orientation_deg"] == 135
+    # Serialised, the fetch would only start after "shore:end".
+    assert timeline.index("fetch:start") < timeline.index("shore:end")
+    assert "fetch:end" in timeline
+
+
+def test_missing_shore_profile_drops_the_started_fetch_without_waiting_for_it(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The safety gate answers alone: a started-but-unneeded fetch is cancelled, not awaited."""
+    today = datetime.now(TZ).date()
+    cancelled = {"count": 0}
+
+    async def unavailable(latitude: float, longitude: float) -> AutoOrientationResponse:
+        # Yield once so the dropped fetch is genuinely in flight, not merely scheduled.
+        await asyncio.sleep(0)
+        return AutoOrientationResponse(status="unavailable", reasons_ar=["لا هندسة"])
+
+    async def never_returns(request: ForecastDecisionRequest) -> ForecastDataset:
+        try:
+            await asyncio.sleep(30)
+        except asyncio.CancelledError:
+            cancelled["count"] += 1
+            raise
+        raise AssertionError("the gate should have dropped this fetch")
+
+    began = time.monotonic()
+    with TestClient(app) as client:
+        monkeypatch.setattr(app.state.coast_orientation, "resolve", unavailable)
+        monkeypatch.setattr(app.state.open_meteo, "forecast_dataset", never_returns)
+        response = client.post("/api/v1/decisions/forecast", json=_forecast_payload(today))
+    elapsed = time.monotonic() - began
+
+    assert response.status_code == 200, response.text
+    body = response.json()
+    assert body["decision"] == "no_go"
+    assert any("اتجاه الساحل" in item for item in body["missing_context_ar"])
+    assert cancelled["count"] == 1
+    assert elapsed < 5.0

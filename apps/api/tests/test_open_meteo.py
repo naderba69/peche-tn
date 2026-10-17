@@ -1,4 +1,5 @@
 import asyncio
+import time
 from datetime import date, datetime
 from zoneinfo import ZoneInfo
 
@@ -10,8 +11,13 @@ from spotdata.domain.models import (
     ForecastDecisionRequest,
     SpotProfile,
 )
+from spotdata.services import open_meteo
 from spotdata.services.cache import AsyncTTLCache
-from spotdata.services.open_meteo import OpenMeteoClient, UpstreamDataError, parse_open_meteo
+from spotdata.services.open_meteo import (
+    OpenMeteoClient,
+    UpstreamDataError,
+    parse_open_meteo,
+)
 
 TZ = ZoneInfo("Africa/Tunis")
 
@@ -254,3 +260,85 @@ def test_forecast_dataset_raises_without_stale_fallback() -> None:
 
     with pytest.raises(UpstreamDataError):
         asyncio.run(run())
+
+
+def _hanging_handler(state: dict[str, object]) -> httpx.MockTransport:
+    """Serve the bundle, then hang the way an overloaded forecast endpoint hangs."""
+
+    async def handler(request: httpx.Request) -> httpx.Response:
+        state["calls"] = int(state.get("calls", 0)) + 1  # type: ignore[arg-type]
+        if state.get("mode") == "hang":
+            await asyncio.sleep(30)
+            raise AssertionError("the fetch budget must cancel this attempt first")
+        marine, weather = state["payloads"]  # type: ignore[assignment]
+        if "marine" in str(request.url.host):
+            return httpx.Response(200, json=marine)
+        return httpx.Response(200, json=weather)
+
+    return httpx.MockTransport(handler)
+
+
+def test_exhausted_budget_fails_before_an_attempt_it_could_not_finish(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Starting a retry that cannot land only delays the answer the caller still needs."""
+
+    monkeypatch.setattr(open_meteo, "_MIN_ATTEMPT_SECONDS", 0.05)
+    state: dict[str, object] = {"mode": "hang", "payloads": _payloads(), "calls": 0}
+
+    async def run() -> UpstreamDataError:
+        async with httpx.AsyncClient(transport=_hanging_handler(state)) as http:
+            client = OpenMeteoClient(
+                http_client=http,
+                weather_url="https://api.open-meteo.com/v1/forecast",
+                marine_url="https://marine-api.open-meteo.com/v1/marine",
+                fetch_budget_seconds=0.4,
+            )
+            with pytest.raises(UpstreamDataError) as caught:
+                await client.forecast_dataset(_request())
+            return caught.value
+
+    began = time.monotonic()
+    error = asyncio.run(run())
+    elapsed = time.monotonic() - began
+    # The unbounded retry ladder used to make this ~90 s (4 attempts x 15 s + backoff).
+    assert elapsed < 5.0, f"the fetch budget was not enforced: took {elapsed:.1f}s"
+    assert error.details["reason"] == "fetch_budget_exhausted"
+    assert int(state["calls"]) <= 2  # type: ignore[arg-type]
+    assert "مهلة" in error.message_ar
+    assert "مزوّد البيانات لا من اتصالك" in error.message_ar
+    assert "البحر والطقس" in error.message_ar
+
+
+def test_stale_bundle_answers_while_the_provider_hangs(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A hanging provider must degrade to the announced cached bundle, not to an error page."""
+
+    monkeypatch.setattr(open_meteo, "_MIN_ATTEMPT_SECONDS", 0.05)
+    state: dict[str, object] = {"mode": "ok", "payloads": _payloads(), "calls": 0}
+
+    async def run() -> tuple[int, int, bool, float]:
+        async with httpx.AsyncClient(transport=_hanging_handler(state)) as http:
+            client = OpenMeteoClient(
+                http_client=http,
+                weather_url="https://api.open-meteo.com/v1/forecast",
+                marine_url="https://marine-api.open-meteo.com/v1/marine",
+                fetch_budget_seconds=0.4,
+            )
+            client.cache = AsyncTTLCache(ttl_seconds=0.0)
+            first = await client.forecast_dataset(_request())
+            state["mode"] = "hang"
+            began = time.monotonic()
+            second = await client.forecast_dataset(_request())
+            return (
+                len(first.hours),
+                len(second.hours),
+                second.cache_fallback_used,
+                time.monotonic() - began,
+            )
+
+    first_hours, second_hours, fell_back, elapsed = asyncio.run(run())
+    assert second_hours == first_hours
+    assert fell_back is True
+    assert elapsed < 5.0

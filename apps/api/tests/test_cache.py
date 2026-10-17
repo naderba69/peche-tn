@@ -55,3 +55,47 @@ async def test_failed_factory_is_not_cached() -> None:
         await cache.get_or_create("key", factory)
     assert await cache.get_or_create("key", factory) == 9
     assert calls == 2
+
+
+async def _immediate(value: str) -> str:
+    return value
+
+
+@pytest.mark.asyncio
+async def test_cancelling_the_creator_stops_the_owned_upstream_task() -> None:
+    """A dropped caller must not leave factory work running with no reader.
+
+    The decision route cancels a started-but-unneeded fetch when its safety gate fails. The
+    factory task lives inside the cache, so the creator has to cancel it on the way out —
+    otherwise its result is discarded, its error goes unretrieved, and the upstream call keeps
+    burning quota nobody will read.
+    """
+    cache: AsyncTTLCache[str, str] = AsyncTTLCache(ttl_seconds=60)
+    state = {"started": False, "cancelled": False, "returned": False}
+
+    async def factory() -> str:
+        state["started"] = True
+        try:
+            await asyncio.sleep(30)
+        except asyncio.CancelledError:
+            state["cancelled"] = True
+            raise
+        state["returned"] = True
+        return "never-cached"
+
+    outer = asyncio.ensure_future(cache.get_or_create("k", factory))
+    await asyncio.sleep(0.01)
+    outer.cancel()
+    with pytest.raises(asyncio.CancelledError):
+        await outer
+    await asyncio.sleep(0.01)
+
+    assert state["started"] is True
+    assert state["cancelled"] is True
+    assert state["returned"] is False
+    assert cache.size == 0
+    # The in-flight slot was released, so a later caller starts fresh instead of awaiting an
+    # orphaned cancelled task forever.
+    assert await cache.get_or_create("k", lambda: _immediate("cached after cancel")) == (
+        "cached after cancel"
+    )

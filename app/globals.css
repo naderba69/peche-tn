@@ -1730,6 +1730,11 @@
   background: linear-gradient(145deg, var(--mint-bright), var(--mint));
   box-shadow: 0 8px 24px rgba(72, 229, 194, .18);
 }
+.mini-badge.mini-caution {
+  color: var(--bg-deep);
+  background: linear-gradient(145deg, #ffd58a, #f0a53a);
+  box-shadow: 0 8px 24px rgba(240, 165, 58, .2);
+}
 .mini-badge.mini-nogo {
   color: #fff;
   background: linear-gradient(145deg, #ff8f88, var(--red));

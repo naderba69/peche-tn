@@ -224,7 +224,7 @@ export function buildFishermanNarrative(
     if (parts.length) paragraphs.push(`${parts.join(" · ")}.`);
   }
 
-  if (result.decision !== "go") {
+  if (result.decision === "no_go") {
     paragraphs.push("الخلاصة: لا تذهب. لا عتاد ولا نوع سمك يفتح ساعات فيها مانع محسوب.");
     return paragraphs;
   }

@@ -82,6 +82,7 @@ const forceMajeureLabels: Record<string, string> = {
 export function MiniReport({ result }: MiniReportProps) {
   const { decision, field_feasibility: field } = result;
   const isGo = decision === "go";
+  const isCaution = decision === "caution";
   const leadWindow = result.recommended_windows[0] ?? null;
 
   const scopeHours: HourDecision[] = useMemo(() => {
@@ -150,24 +151,25 @@ export function MiniReport({ result }: MiniReportProps) {
     <section className="mini-report" aria-label="الخلاصة السريعة">
       <div className="mini-report-head">
         <span className="mini-report-title">📋 الخلاصة السريعة</span>
-        <span className={`mini-badge mini-${isGo ? "go" : "nogo"}`}>
-          {isGo ? "✅ اذهب" : "⛔ لا تذهب"}
+        <span className={`mini-badge mini-${isGo ? "go" : isCaution ? "caution" : "nogo"}`}>
+          {isGo ? "✅ اذهب" : isCaution ? "⚠ حذر مع توضيح التحذير" : "⛔ لا تذهب"}
         </span>
       </div>
 
       <div className="mini-report-body">
-        {isGo && leadWindow ? (
+        {(isGo || isCaution) && leadWindow ? (
           <div className="mini-line mini-line-lead">
             <CalendarClock size={16} />
             <span>
-              <strong>ساعات بلا موانع:</strong> <bdi>{formatWindowRange(leadWindow.start, leadWindow.end)}</bdi>
+              <strong>{isGo ? "ساعات بلا موانع:" : "ساعات مفتوحة بتحذير:"}</strong> <bdi>{formatWindowRange(leadWindow.start, leadWindow.end)}</bdi>
             </span>
           </div>
         ) : (
           <div className="mini-line mini-line-lead mini-line-block">
             <CircleAlert size={16} />
             <span>
-              <strong>السبب القاهر:</strong> {causeLabel ?? "عامل غير قابل للتكيّف"}
+              <strong>{isCaution ? "سبب التحذير:" : "السبب القاهر:"}</strong>{" "}
+              {causeLabel ?? (isCaution ? "تحذير احترازي" : "عامل غير قابل للتكيّف")}
             </span>
           </div>
         )}

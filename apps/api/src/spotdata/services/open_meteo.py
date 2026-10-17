@@ -110,6 +110,37 @@ WEATHER_RAW_TO_FIELD: dict[str, str] = {
 }
 
 
+def forecast_request_params(
+    request: ForecastDecisionRequest,
+) -> tuple[dict[str, Any], dict[str, Any], bool]:
+    """Open-Meteo marine and weather parameters for a request (single source of truth)."""
+    # Preserve up to 72 hours of model context for transparent trend displays.
+    # This does not turn the matrix's fixed "48-hour rule" into a catch score.
+    start_date = request.target_date - timedelta(days=3)
+    end_date = request.target_date + timedelta(days=1)
+    common = {
+        "latitude": request.location.latitude,
+        "longitude": request.location.longitude,
+        "timezone": "Africa/Tunis",
+        "start_date": start_date.isoformat(),
+        "end_date": end_date.isoformat(),
+    }
+    marine_params = {
+        **common,
+        "hourly": ",".join(MARINE_VARIABLES),
+        "cell_selection": "sea",
+    }
+    weather_params = {
+        **common,
+        "hourly": ",".join(WEATHER_VARIABLES),
+        "daily": "sunrise,sunset,moonrise,moonset",
+        "wind_speed_unit": "kmh",
+        "cell_selection": "nearest",
+    }
+    include_current = request.target_date == datetime.now(TUNIS_TZ).date()
+    return marine_params, weather_params, include_current
+
+
 class UpstreamDataError(RuntimeError):
     def __init__(self, message_ar: str, *, details: dict[str, Any] | None = None) -> None:
         super().__init__(message_ar)
@@ -158,36 +189,49 @@ class OpenMeteoClient:
             max_entries=256,
         )
 
+    def request_spec(self, request: ForecastDecisionRequest) -> dict[str, Any]:
+        """Exact upstream URLs and parameters, so a browser can fetch the same data."""
+        marine_params, weather_params, include_current = forecast_request_params(request)
+        return {
+            "marine_url": self._marine_url,
+            "marine_params": marine_params,
+            "weather_url": self._weather_url,
+            "weather_params": weather_params,
+            "include_current_observation": include_current,
+        }
+
     async def forecast_dataset(self, request: ForecastDecisionRequest) -> ForecastDataset:
-        # Environmental inputs come only from this server-side provider fetch; the
-        # public request cannot substitute a browser-supplied forecast bundle.
+        # Default path: the server fetches Open-Meteo itself. Browser-fetched bundles are
+        # handled only by ``dataset_from_device_bundle``, after the device key check.
         return await self._dataset_from_upstream(request)
 
+    async def dataset_from_device_bundle(
+        self,
+        request: ForecastDecisionRequest,
+        marine: dict[str, Any],
+        weather: dict[str, Any],
+        retrieved_at: datetime,
+    ) -> ForecastDataset:
+        """Build the dataset from Open-Meteo JSON fetched by the owner's device.
+
+        No Open-Meteo call is made here. Current-day METAR is still read from the aviation
+        service because it is not part of the device fetch.
+        """
+        _, _, include_current = forecast_request_params(request)
+        metar = await self._get_optional_observations() if include_current else []
+        return parse_open_meteo(
+            request=request,
+            marine=marine,
+            weather=weather,
+            metar=metar,
+            retrieved_at=retrieved_at,
+            fetched_by_device=True,
+        )
+
     async def _dataset_from_upstream(self, request: ForecastDecisionRequest) -> ForecastDataset:
-        # Preserve up to 72 hours of model context for transparent trend displays.
-        # This does not turn the matrix's fixed "48-hour rule" into a catch score.
-        start_date = request.target_date - timedelta(days=3)
-        end_date = request.target_date + timedelta(days=1)
-        common = {
-            "latitude": request.location.latitude,
-            "longitude": request.location.longitude,
-            "timezone": "Africa/Tunis",
-            "start_date": start_date.isoformat(),
-            "end_date": end_date.isoformat(),
-        }
-        marine_params = {
-            **common,
-            "hourly": ",".join(MARINE_VARIABLES),
-            "cell_selection": "sea",
-        }
-        weather_params = {
-            **common,
-            "hourly": ",".join(WEATHER_VARIABLES),
-            "daily": "sunrise,sunset,moonrise,moonset",
-            "wind_speed_unit": "kmh",
-            "cell_selection": "nearest",
-        }
-        include_current_observation = request.target_date == datetime.now(TUNIS_TZ).date()
+        marine_params, weather_params, include_current_observation = forecast_request_params(
+            request
+        )
         cache_key = (
             round(request.location.latitude, 4),
             round(request.location.longitude, 4),
@@ -410,6 +454,7 @@ def parse_open_meteo(
     metar: list[Any] | None = None,
     cache_fallback_used: bool = False,
     cache_fallback_age_seconds: float | None = None,
+    fetched_by_device: bool = False,
     secondary_marine: dict[str, Any] | None = None,
     secondary_marine_model: str | None = None,
     secondary_weather: dict[str, Any] | None = None,
@@ -497,7 +542,10 @@ def parse_open_meteo(
     current_observation = parse_nearest_metar(metar or [], request.location, retrieved_at)
     sources = [
         SourceMetadata(
-            provider="Open-Meteo / Météo-France, ECMWF, DWD and NCEP model blend",
+            provider=(
+                "Open-Meteo / Météo-France, ECMWF, DWD and NCEP model blend"
+                + (" (جُلبت من جهاز المالك بمفتاح خاص)" if fetched_by_device else "")
+            ),
             product="Marine Weather API (waves; SMOC currents, sea level and SST)",
             data_kind="model_forecast",
             variables=marine_variables,
@@ -512,7 +560,10 @@ def parse_open_meteo(
             ],
         ),
         SourceMetadata(
-            provider="Open-Meteo model blend",
+            provider=(
+                "Open-Meteo model blend"
+                + (" (جُلبت من جهاز المالك بمفتاح خاص)" if fetched_by_device else "")
+            ),
             product="Weather Forecast API (Best Match)",
             data_kind="model_forecast",
             variables=weather_variables,

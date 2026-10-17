@@ -1,14 +1,16 @@
 from __future__ import annotations
 
 import asyncio
+import hmac
 import logging
-from datetime import UTC, datetime, timedelta
-from typing import Annotated
+from datetime import UTC, date, datetime, timedelta
+from typing import Annotated, NoReturn
 from zoneinfo import ZoneInfo
 
-from fastapi import APIRouter, Header, HTTPException, Request, status
+from fastapi import APIRouter, Header, HTTPException, Query, Request, status
 
 from spotdata import __version__
+from spotdata.config import settings
 from spotdata.domain.engine import ENGINE_VERSION, DecisionEngine, InsufficientDataError
 from spotdata.domain.enums import (
     DecisionLevel,
@@ -27,8 +29,10 @@ from spotdata.domain.models import (
     AutoOrientationRequest,
     AutoOrientationResponse,
     CoastalWaterContext,
+    Coordinates,
     DecisionPreflightNoGo,
     DecisionResponse,
+    DeviceForecastBundle,
     ForecastDataset,
     ForecastDecisionRequest,
     GeminiKeyVerificationResponse,
@@ -346,6 +350,77 @@ def _wave_fetch_diagnostic(
     )
 
 
+def _require_device_key(request: Request) -> None:
+    """Browser-fetched forecast bundles are accepted only from the owner's device.
+
+    The key lives in the owner's browser (localStorage) and on the server as
+    SPOTDATA_DEVICE_KEY. With the variable unset, the feature is disabled entirely.
+    """
+    expected = settings.device_access_key
+    supplied = request.headers.get("x-device-key", "")
+    if not expected or not hmac.compare_digest(supplied.encode(), expected.encode()):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail={
+                "code": "device_key_invalid",
+                "message_ar": "مفتاح الجهاز غير صحيح أو غير مفعّل؛ لا يُقبل جلب البيانات من الجهاز.",
+            },
+        )
+
+
+def _validate_device_bundle(bundle: DeviceForecastBundle, target_date: date) -> None:
+    """Shape check only: the server cannot authenticate a key holder's data, so this rejects
+    malformed or uncovered bundles. Missing hours still become gaps and never produce GO."""
+    for name, payload in (("marine", bundle.marine), ("weather", bundle.weather)):
+        hourly = payload.get("hourly")
+        times = hourly.get("time") if isinstance(hourly, dict) else None
+        if not isinstance(times, list) or not all(isinstance(item, str) for item in times):
+            _device_bundle_error(f"{name}.hourly.time")
+        assert isinstance(times, list)
+        if not any(str(item).startswith(target_date.isoformat()) for item in times):
+            _device_bundle_error(f"{name}.hourly.time لا يغطي اليوم المطلوب")
+
+
+def _device_bundle_error(detail: str) -> NoReturn:
+    raise HTTPException(
+        status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+        detail={
+            "code": "device_forecast_invalid",
+            "message_ar": "بيانات الجهاز ناقصة أو غير مطابقة للطلب؛ لم يُصدر قرار.",
+            "details": {"problem": detail},
+        },
+    )
+
+
+@router.get(
+    "/v1/forecast/request-spec",
+    tags=["decisions"],
+    summary="Exact Open-Meteo URLs and parameters a device should fetch for a forecast day",
+)
+async def forecast_request_spec(
+    request: Request,
+    latitude: Annotated[float, Query(ge=30.0, le=38.5)],
+    longitude: Annotated[float, Query(ge=7.0, le=12.5)],
+    target_date: date,
+) -> dict[str, object]:
+    today = datetime.now(TUNIS_TZ).date()
+    if target_date < today or target_date > today + timedelta(days=7):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail={
+                "code": "target_date_out_of_range",
+                "message_ar": "التاريخ يجب أن يكون بين اليوم وسبعة أيام قادمة.",
+            },
+        )
+    client: OpenMeteoClient = request.app.state.open_meteo
+    probe = ForecastDecisionRequest(
+        location=Coordinates(latitude=latitude, longitude=longitude),
+        target_date=target_date,
+        spot=SpotProfile(seaward_orientation_deg=0),
+    )
+    return client.request_spec(probe)
+
+
 @router.post(
     "/v1/decisions/forecast",
     response_model=DecisionResponse | DecisionPreflightNoGo,
@@ -368,6 +443,10 @@ async def forecast_decision(
                 },
             },
         )
+    device_bundle = payload.device_forecast
+    if device_bundle is not None:
+        _require_device_key(request)
+        _validate_device_bundle(device_bundle, payload.target_date)
     coast_client: CoastOrientationClient = request.app.state.coast_orientation
     automated_profile = await coast_client.resolve(
         payload.location.latitude,
@@ -420,8 +499,17 @@ async def forecast_decision(
     try:
         fetch_task = asyncio.create_task(_coastline_for_diagnostic(coast_client, verified_payload))
         try:
+            if device_bundle is not None:
+                forecast_task = client.dataset_from_device_bundle(
+                    verified_payload,
+                    device_bundle.marine,
+                    device_bundle.weather,
+                    device_bundle.retrieved_at,
+                )
+            else:
+                forecast_task = client.forecast_dataset(verified_payload)
             dataset, water_context = await asyncio.gather(
-                client.forecast_dataset(verified_payload),
+                forecast_task,
                 optional_water_context(),
             )
         except BaseException:

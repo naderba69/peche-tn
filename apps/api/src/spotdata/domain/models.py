@@ -1111,11 +1111,25 @@ class OfficialWarning(StrictModel):
         return value
 
 
+class DeviceForecastBundle(StrictModel):
+    """Raw Open-Meteo marine/weather JSON fetched by the owner's own device.
+
+    Accepted ONLY with a valid ``X-Device-Key`` header (see ``routes._require_device_key``).
+    Without that key the server fetches Open-Meteo itself and this field is ignored.
+    """
+
+    marine: dict[str, Any]
+    weather: dict[str, Any]
+    retrieved_at: datetime
+
+
 class ForecastDecisionRequest(StrictModel):
     location: Coordinates
     target_date: date
     spot: SpotProfile
     angler: AnglerProfile = Field(default_factory=AnglerProfile)
+    # Never serialized back out. Requires the device key; see DeviceForecastBundle.
+    device_forecast: DeviceForecastBundle | None = Field(default=None, exclude=True)
     # Deprecated compatibility fields. Accepted but deliberately not passed to the engine.
     field_reports: list[FieldReport] = Field(
         default_factory=list,

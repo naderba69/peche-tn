@@ -29,6 +29,8 @@ class Settings:
     # Copernicus Marine credentials (optional). Used only if the `copernicus` extra is installed.
     copernicus_username: str | None = None
     copernicus_password: str | None = None
+    # Owner-only key that authorizes browser-fetched forecast bundles. Unset = disabled.
+    device_access_key: str | None = None
 
     @classmethod
     def from_env(cls) -> Settings:
@@ -63,6 +65,7 @@ class Settings:
             ).strip(),
             copernicus_username=os.getenv("COPERNICUSMARINE_SERVICE_USERNAME") or None,
             copernicus_password=os.getenv("COPERNICUSMARINE_SERVICE_PASSWORD") or None,
+            device_access_key=os.getenv("SPOTDATA_DEVICE_KEY") or None,
             secondary_weather_model=os.getenv(
                 "OPEN_METEO_SECONDARY_WEATHER_MODEL", "icon_seamless"
             ).strip(),

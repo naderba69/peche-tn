@@ -94,6 +94,84 @@ export async function requestApiHealth(signal?: AbortSignal): Promise<ApiHealthR
   );
 }
 
+const DEVICE_KEY_STORAGE = "peche-tn:device-key";
+
+interface ForecastRequestSpec {
+  marine_url: string;
+  marine_params: Record<string, string | number>;
+  weather_url: string;
+  weather_params: Record<string, string | number>;
+  include_current_observation: boolean;
+}
+
+export interface DeviceForecastBundle {
+  marine: Record<string, unknown>;
+  weather: Record<string, unknown>;
+  retrieved_at: string;
+}
+
+export function readDeviceKey(): string {
+  try {
+    return window.localStorage.getItem(DEVICE_KEY_STORAGE)?.trim() ?? "";
+  } catch {
+    return "";
+  }
+}
+
+export function saveDeviceKey(value: string): void {
+  window.localStorage.setItem(DEVICE_KEY_STORAGE, value.trim());
+}
+
+export function clearDeviceKey(): void {
+  window.localStorage.removeItem(DEVICE_KEY_STORAGE);
+}
+
+async function openMeteoJson(
+  url: string,
+  params: Record<string, string | number>,
+  label: string,
+  signal?: AbortSignal,
+): Promise<Record<string, unknown>> {
+  const target = new URL(url);
+  for (const [name, value] of Object.entries(params)) {
+    target.searchParams.set(name, String(value));
+  }
+  const response = await fetch(target.toString(), { signal });
+  if (!response.ok) {
+    throw new Error(`تعذر جلب ${label} من جهازك (HTTP ${response.status}).`);
+  }
+  const body: unknown = await response.json();
+  if (!body || typeof body !== "object") {
+    throw new Error(`استجابة ${label} من جهازك غير صالحة.`);
+  }
+  return body as Record<string, unknown>;
+}
+
+/** Fetch the same Open-Meteo data the server would fetch, but from this device. */
+async function fetchDeviceBundle(
+  payload: ForecastDecisionRequest,
+  signal?: AbortSignal,
+): Promise<DeviceForecastBundle> {
+  const query = new URLSearchParams({
+    latitude: String(payload.location.latitude),
+    longitude: String(payload.location.longitude),
+    target_date: payload.target_date,
+  });
+  const specResponse = await fetch(`/api/v1/forecast/request-spec?${query.toString()}`, {
+    signal,
+    cache: "no-store",
+  });
+  const spec = await parseResponse<ForecastRequestSpec>(
+    specResponse,
+    "تعذر تحديد بيانات الطقس المطلوبة.",
+  );
+  const [marine, weather] = await Promise.all([
+    openMeteoJson(spec.marine_url, spec.marine_params, "بيانات البحر", signal),
+    openMeteoJson(spec.weather_url, spec.weather_params, "بيانات الطقس", signal),
+  ]);
+  return { marine, weather, retrieved_at: new Date().toISOString() };
+}
+
 export async function requestDecision(
   payload: ForecastDecisionRequest,
   signal?: AbortSignal,
@@ -110,10 +188,25 @@ export async function requestDecision(
     // Storage can be disabled; network remains functional.
   }
 
+  const headers: Record<string, string> = { "Content-Type": "application/json" };
+  let body: ForecastDecisionRequest | (ForecastDecisionRequest & { device_forecast: DeviceForecastBundle }) =
+    payload;
+  const deviceKey = readDeviceKey();
+  if (deviceKey) {
+    try {
+      const device = await fetchDeviceBundle(payload, signal);
+      body = { ...payload, device_forecast: device };
+      headers["X-Device-Key"] = deviceKey;
+    } catch (cause) {
+      if (signal?.aborted) throw cause;
+      // Device fetch failed (network or provider limit): use the server fetch path instead.
+    }
+  }
+
   const response = await fetch("/api/v1/decisions/forecast", {
     method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(payload),
+    headers,
+    body: JSON.stringify(body),
     signal,
   });
   const decision = await parseResponse<DecisionApiResponse>(

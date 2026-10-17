@@ -6,6 +6,7 @@ import { DecisionResult } from "@/components/DecisionResult";
 import { LoadingPreview } from "@/components/LoadingPreview";
 import { Planner } from "@/components/Planner";
 import { requestApiHealth, requestDecision } from "@/lib/api";
+import { DeviceKeyPanel } from "@/components/DeviceKeyPanel";
 import { tunisTodayIso } from "@/lib/format";
 import type { DecisionApiResponse, ForecastDecisionRequest } from "@/lib/types";
 
@@ -189,6 +190,7 @@ export function DecisionApp() {
 
   return (
     <>
+      <DeviceKeyPanel />
       <section className={`api-console api-${apiState.status}`} aria-live="polite" data-testid="api-console">
         <div className="api-console-state">
           <span className="api-state-icon">

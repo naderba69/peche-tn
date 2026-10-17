@@ -22,16 +22,19 @@ export function buildPrimaryReason(result: DecisionResponse): string {
         return "قرار الذهاب يتطلب نافذة اجتازت بوابتي السلامة والتنفيذ؛ لا توجد نافذة مرفقة لتفسير القرار.";
       }
       const hours = windowHours(result, lead);
-      const formatRange = (values: (number | null)[]): string | null => {
+      // Decimals are per quantity: wave heights are sub-metre, so 0.40–0.50 must not print as 0–0.
+      const formatRange = (values: (number | null)[], digits: number): string | null => {
         const present = numeric(values);
         if (!present.length) return null;
         const min = Math.min(...present);
         const max = Math.max(...present);
-        return min === max ? max.toFixed(0) : `${min.toFixed(0)}–${max.toFixed(0)}`;
+        return min.toFixed(digits) === max.toFixed(digits)
+          ? max.toFixed(digits)
+          : `${min.toFixed(digits)}–${max.toFixed(digits)}`;
       };
-      const windRange = formatRange(hours.map((hour) => hour.forecast.wind_speed_kmh));
+      const windRange = formatRange(hours.map((hour) => hour.forecast.wind_speed_kmh), 0);
       const gustValues = numeric(hours.map((hour) => hour.forecast.wind_gust_kmh));
-      const waveRange = formatRange(hours.map((hour) => hour.forecast.wave_height_m));
+      const waveRange = formatRange(hours.map((hour) => hour.forecast.wave_height_m), 2);
       const conditions = [
         windRange ? `الريح ${windRange} كم/س` : null,
         gustValues.length ? `الهبات حتى ${Math.max(...gustValues).toFixed(0)} كم/س` : null,

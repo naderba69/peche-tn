@@ -40,3 +40,5 @@ async def test_weaker_first_mirror_does_not_hide_verified_geometry() -> None:
     assert result.evidence is not None
     assert result.evidence.server == strong
     assert result.evidence.confidence == "high"
+    assert result.evidence.tangent_spread_deg is not None
+    assert result.evidence.tangent_spread_deg <= 15

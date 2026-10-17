@@ -268,7 +268,14 @@ export function Planner({ value, loading, error, hasResult, isDirty, onChange, o
     orientationBlockers.push("لم يُعتمد دليل الاتجاه من OSM لهذه النقطة");
   } else {
     if (orientationEvidence.confidence !== "high") {
-      orientationBlockers.push(`ثقة الهندسة ${orientationConfidenceLabel ?? "غير معروفة"} وليست مرتفعة`);
+      const spread = orientationEvidence.tangent_spread_deg;
+      const spreadPart =
+        spread != null && spread > 15
+          ? ` لأن تشتت اتجاه الساحل المحلي ${spread.toFixed(1)}° (الحد 15°)`
+          : "";
+      orientationBlockers.push(
+        `ثقة الهندسة ${orientationConfidenceLabel ?? "غير معروفة"} وليست مرتفعة${spreadPart}`,
+      );
     }
     if (orientationEvidence.coastline_distance_m > 500) {
       orientationBlockers.push(
@@ -479,6 +486,9 @@ export function Planner({ value, loading, error, hasResult, isDirty, onChange, o
               <span><bdi>{orientationEvidence.orientation_deg.toFixed(1)}°</bdi><small>اتجاه البحر</small></span>
               <span><bdi>{orientationEvidence.coastline_tangent_deg.toFixed(1)}°</bdi><small>مماس الساحل</small></span>
               <span><bdi>{orientationEvidence.coastline_distance_m.toFixed(0)} م</bdi><small>مسافة الساحل</small></span>
+              {orientationEvidence.tangent_spread_deg != null && (
+                <span><bdi>{orientationEvidence.tangent_spread_deg.toFixed(1)}°</bdi><small>تشتت المماس (الحد 15°)</small></span>
+              )}
               <span><bdi>{orientationEvidence.search_radius_m} م</bdi><small>نصف البحث</small></span>
               <span><bdi>{orientationEvidence.segments_used}</bdi><small>المقاطع</small></span>
               <span><bdi>{orientationConfidenceLabel}</bdi><small>ثقة اتجاه الهندسة</small></span>

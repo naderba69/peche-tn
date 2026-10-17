@@ -27,8 +27,10 @@ TUNIS_TZ = ZoneInfo("Africa/Tunis")
 # Backoff before each upstream attempt. 429s on the shared cloud egress IP are
 # usually short-lived; longer waits ride them out without hammering the provider.
 _RETRY_DELAYS_SECONDS = (0.0, 0.75, 2.0, 5.0)
+# Forecast inputs are hourly model runs; 30 minutes keeps repeated analyses of the same
+# point from re-fetching while staying close to the model update cadence.
+_FORECAST_CACHE_TTL_SECONDS = 1800
 # Upper bound for honouring an upstream Retry-After header inside one request.
-_MAX_RETRY_AFTER_SECONDS = 8.0
 # When a fresh upstream fetch fails, a recently cached bundle is served instead
 # of an error. 6 hours keeps the fallback useful without misleading staleness.
 _STALE_BUNDLE_SECONDS = 6 * 3600.0
@@ -152,7 +154,7 @@ class OpenMeteoClient:
             tuple[float, float, date, bool], tuple[float, _UpstreamBundle]
         ] = OrderedDict()
         self.cache: AsyncTTLCache[tuple[float, float, date, bool], _UpstreamBundle] = AsyncTTLCache(
-            ttl_seconds=600,
+            ttl_seconds=_FORECAST_CACHE_TTL_SECONDS,
             max_entries=256,
         )
 
@@ -248,24 +250,6 @@ class OpenMeteoClient:
             if include_current_observation
             else asyncio.sleep(0, result=[])
         )
-        secondary_marine_task = (
-            self._get_optional_json(
-                self._marine_url,
-                {**marine_params, "models": self._secondary_marine_model},
-                "البحر (نموذج ثانٍ)",
-            )
-            if self._secondary_marine_model
-            else asyncio.sleep(0, result=None)
-        )
-        secondary_weather_task = (
-            self._get_optional_json(
-                self._weather_url,
-                {**weather_params, "models": self._secondary_weather_model},
-                "الطقس (نموذج ثانٍ)",
-            )
-            if self._secondary_weather_model
-            else asyncio.sleep(0, result=None)
-        )
         copernicus_task = (
             self._copernicus.hourly_for_point(
                 float(marine_params["latitude"]),
@@ -277,20 +261,31 @@ class OpenMeteoClient:
             else asyncio.sleep(0, result=None)
         )
         try:
-            (
-                marine_result,
-                weather_result,
-                metar_result,
-                secondary_marine,
-                secondary_weather,
-                copernicus_marine,
-            ) = await asyncio.gather(
+            # Primary requests first. Each analysis costs two Open-Meteo calls here; the
+            # secondary models are fetched only when the primary has a gap they could fill.
+            marine_result, weather_result, metar_result, copernicus_marine = await asyncio.gather(
                 self._get_json(self._marine_url, marine_params, "البحر"),
                 self._get_json(self._weather_url, weather_params, "الطقس"),
                 observation_task,
-                secondary_marine_task,
-                secondary_weather_task,
                 copernicus_task,
+            )
+            secondary_marine, secondary_weather = await asyncio.gather(
+                self._secondary_if_gaps(
+                    self._marine_url,
+                    {**marine_params, "models": self._secondary_marine_model},
+                    marine_result,
+                    MARINE_VARIABLES,
+                    "البحر (نموذج ثانٍ)",
+                    enabled=bool(self._secondary_marine_model),
+                ),
+                self._secondary_if_gaps(
+                    self._weather_url,
+                    {**weather_params, "models": self._secondary_weather_model},
+                    weather_result,
+                    WEATHER_VARIABLES,
+                    "الطقس (نموذج ثانٍ)",
+                    enabled=bool(self._secondary_weather_model),
+                ),
             )
         except UpstreamDataError:
             raise
@@ -305,6 +300,26 @@ class OpenMeteoClient:
             secondary_weather=secondary_weather,
             copernicus_marine=copernicus_marine,
         )
+
+    async def _secondary_if_gaps(
+        self,
+        url: str,
+        params: dict[str, Any],
+        primary: dict[str, Any],
+        variables: tuple[str, ...],
+        source_label: str,
+        *,
+        enabled: bool,
+    ) -> dict[str, Any] | None:
+        """Call an optional secondary model only when the primary payload has a gap.
+
+        Secondary values are used only to fill None entries (see ``_fill_hourly_gaps``), so
+        skipping the call when the primary is complete does not change the forecast. It does
+        remove one upstream request per analysis, which is what triggered 429 responses.
+        """
+        if not enabled or not _has_hourly_gaps(primary, variables):
+            return None
+        return await self._get_optional_json(url, params, source_label)
 
     async def _get_optional_json(
         self, url: str, params: dict[str, Any], source_label: str
@@ -364,7 +379,9 @@ class OpenMeteoClient:
                 status = (
                     exc.response.status_code if isinstance(exc, httpx.HTTPStatusError) else None
                 )
-                retryable = status is None or status == 429 or status >= 500
+                # HTTP 429 is never retried: every retry adds load to the same shared quota and
+                # makes the next analysis fail too. The stale-bundle fallback handles it instead.
+                retryable = status is None or status >= 500
                 LOGGER.warning(
                     "Open-Meteo %s request failed attempt=%s status=%s: %s",
                     source_label,
@@ -376,28 +393,12 @@ class OpenMeteoClient:
                     break
                 if attempt == len(_RETRY_DELAYS_SECONDS):
                     break
-                if isinstance(exc, httpx.HTTPStatusError) and status == 429:
-                    retry_after = _parse_retry_after(exc.response.headers.get("retry-after"))
-                    if retry_after is not None:
-                        await asyncio.sleep(min(retry_after, _MAX_RETRY_AFTER_SECONDS))
         details: dict[str, Any] = {"source": source_label}
         if isinstance(last_error, httpx.HTTPStatusError):
             details["status"] = last_error.response.status_code
         raise UpstreamDataError(
             f"تعذر جلب بيانات {source_label} من مزود الأرصاد.", details=details
         ) from last_error
-
-
-def _parse_retry_after(value: str | None) -> float | None:
-    if not value:
-        return None
-    try:
-        seconds = float(value)
-    except ValueError:
-        return None
-    if seconds <= 0.0:
-        return None
-    return seconds
 
 
 def parse_open_meteo(
@@ -617,6 +618,18 @@ def _object(value: Any, path: str) -> dict[str, Any]:
     if not isinstance(value, dict):
         raise UpstreamDataError("بيانات مزود الأرصاد ناقصة.", details={"missing_or_invalid": path})
     return value
+
+
+def _has_hourly_gaps(payload: dict[str, Any], variables: tuple[str, ...]) -> bool:
+    """True when any requested hourly variable is missing or contains a None value."""
+    hourly = payload.get("hourly")
+    if not isinstance(hourly, dict):
+        return True
+    for variable in variables:
+        values = hourly.get(variable)
+        if not isinstance(values, list) or any(value is None for value in values):
+            return True
+    return False
 
 
 def _fill_hourly_gaps(

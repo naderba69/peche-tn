@@ -49,6 +49,9 @@ class OrientationEvidence(StrictModel):
     coastline_distance_m: float = Field(ge=0)
     search_radius_m: int = Field(ge=100, le=20_000)
     segments_used: int = Field(ge=1, le=25)
+    # Spread of local coastline tangents; the "high" confidence rule requires <= 15 degrees.
+    # Optional so previously stored evidence still validates.
+    tangent_spread_deg: float | None = Field(default=None, ge=0, le=180)
     confidence: Literal["high", "medium", "low"]
     provider: Literal["OpenStreetMap Overpass"] = "OpenStreetMap Overpass"
     server: str = Field(min_length=8, max_length=200)
